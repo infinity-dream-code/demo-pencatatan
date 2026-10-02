@@ -502,6 +502,93 @@ Route::prefix("admin")
                     });
             });
 
+        Route::prefix("smartcard")
+            ->name("smartcard.")
+            ->group(function () {
+                Route::controller(\App\Http\Controllers\Admin\Smartcard\DataKartuSiswaController::class)
+                    ->prefix("data-kartu-siswa")
+                    ->name("data-kartu-siswa.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::post("/", "store")->name("store");
+                        Route::get("siswa-search", "siswaSearch")->name("siswa-search");
+                    });
+
+                Route::controller(\App\Http\Controllers\Admin\Smartcard\SettingBlokirKartuController::class)
+                    ->prefix("setting-blokir-kartu")
+                    ->name("setting-blokir-kartu.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::post("/", "update")->name("update");
+                    });
+
+                Route::controller(\App\Http\Controllers\Admin\Smartcard\SettingBatasanKartuController::class)
+                    ->prefix("setting-batasan-saku")
+                    ->name("setting-batasan-saku.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::post("/", "store")->name("store");
+                    });
+
+                Route::get("transaksi-belanja", [\App\Http\Controllers\Admin\Smartcard\TransaksiBelanjaController::class, "index"])
+                    ->name("transaksi-belanja.index");
+
+                Route::controller(\App\Http\Controllers\Admin\Smartcard\RekapPencairanKantinController::class)
+                    ->prefix("pencairan-kantin")
+                    ->name("pencairan-kantin.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::post("/", "store")->name("store");
+                    });
+
+                Route::controller(\App\Http\Controllers\Admin\Smartcard\RekapTopupController::class)
+                    ->prefix("rekap-topup")
+                    ->name("rekap-topup.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::post("cetak", "printRekap")->name("cetak");
+                    });
+
+                Route::controller(\App\Http\Controllers\Admin\Smartcard\TopupSaldoController::class)
+                    ->prefix("topup-saldo")
+                    ->name("topup-saldo.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::post("/", "store")->name("store");
+                        Route::get("siswa-search", "siswaSearch")->name("siswa-search");
+                        Route::get("siswa-detail", "siswaDetail")->name("siswa-detail");
+                        Route::post("cetak", "cetakKuitansi")->name("cetak");
+                    });
+
+                Route::controller(\App\Http\Controllers\Admin\Smartcard\RekapKeluarUangSakuController::class)
+                    ->prefix("rekap-keluar-uang-saku")
+                    ->name("rekap-keluar-uang-saku.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::post("cetak", "printRekap")->name("cetak");
+                    });
+
+                Route::controller(\App\Http\Controllers\Admin\Smartcard\KeluarUangSakuController::class)
+                    ->prefix("keluar-uang-saku")
+                    ->name("keluar-uang-saku.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::get("siswa-search", "siswaSearch")->name("siswa-search");
+                        Route::get("siswa-detail", "siswaDetail")->name("siswa-detail");
+                        Route::post("store", "store")->name("store");
+                        Route::post("cetak", "cetak")->name("cetak");
+                    });
+
+                Route::controller(\App\Http\Controllers\Admin\Smartcard\TapAmbilRutinController::class)
+                    ->prefix("tap-ambil-rutin")
+                    ->name("tap-ambil-rutin.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::post("lookup", "lookup")->name("lookup");
+                        Route::post("process", "process")->name("process");
+                    });
+            });
+
         Route::prefix("update-musrifah")
             ->name("update-musrifah.")
             ->controller(\App\Http\Controllers\Admin\UpdateMusrifahController::class)

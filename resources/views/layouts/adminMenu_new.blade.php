@@ -273,6 +273,65 @@
             </ul>
         </li>
 
+        <li class="menu-item {{ Request::is(['admin/smartcard*']) ? 'active open' : '' }}">
+            <a href="javascript:void(0);" class="menu-link menu-toggle">
+                <i class="menu-icon ri ri-bank-card-line"></i>
+                <div data-i18n="smartCARD">smartCARD</div>
+            </a>
+            <ul class="menu-sub">
+                <li class="menu-item {{ Request::is(['admin/smartcard/data-kartu-siswa*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.smartcard.data-kartu-siswa.index') }}" class="menu-link">
+                        <div>Data Kartu Siswa</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/smartcard/setting-blokir-kartu*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.smartcard.setting-blokir-kartu.index') }}" class="menu-link">
+                        <div>Setting Blokir Kartu</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/smartcard/setting-batasan-saku*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.smartcard.setting-batasan-saku.index') }}" class="menu-link">
+                        <div>Setting Batasan Kartu</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/smartcard/transaksi-belanja*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.smartcard.transaksi-belanja.index') }}" class="menu-link">
+                        <div>Transaksi Belanja</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/smartcard/pencairan-kantin*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.smartcard.pencairan-kantin.index') }}" class="menu-link">
+                        <div>Rekap Pencairan Kantin</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/smartcard/rekap-topup*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.smartcard.rekap-topup.index') }}" class="menu-link">
+                        <div>Rekap Topup</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/smartcard/topup-saldo*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.smartcard.topup-saldo.index') }}" class="menu-link">
+                        <div>Topup Cash</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/smartcard/rekap-keluar-uang-saku*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.smartcard.rekap-keluar-uang-saku.index') }}" class="menu-link">
+                        <div>Rekap Keluar Uang Saku</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/smartcard/keluar-uang-saku*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.smartcard.keluar-uang-saku.index') }}" class="menu-link">
+                        <div>Keluar Uang Saku</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/smartcard/tap-ambil-rutin*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.smartcard.tap-ambil-rutin.index') }}" class="menu-link">
+                        <div>Tap Ambil Rutin</div>
+                    </a>
+                </li>
+            </ul>
+        </li>
+
         <li class="menu-item {{ Request::is(['admin/update-musrifah*']) ? 'active' : '' }}">
             <a href="{{ route('admin.update-musrifah.index') }}" class="menu-link">
                 <i class="menu-icon ri ri-user-settings-line"></i>
