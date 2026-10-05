@@ -44,9 +44,15 @@
                         <input type="text" class="form-control" id="namaSiswa" value="{{ $nama ?? '' }}"
                                readonly tabindex="-1" placeholder="Otomatis dari NIS">
                     </div>
-                    <div class="col-md-2 d-flex gap-2">
+                    <div class="col-md-2 d-flex gap-2 flex-wrap">
                         <button type="submit" class="btn btn-primary flex-grow-1">Lihat</button>
                         <a href="{{ route('admin.smartcard.setting-blokir-kartu.index') }}" class="btn btn-outline-secondary">Reset</a>
+                    </div>
+                    <div class="col-12">
+                        <a href="{{ route('admin.smartcard.setting-blokir-kartu.export', request()->query()) }}"
+                           class="btn btn-success">
+                            <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                        </a>
                     </div>
                 </div>
             </form>
@@ -54,7 +60,13 @@
     </div>
 
     <div class="card">
-        <div class="card-header"><h5 class="mb-0">Daftar Kartu</h5></div>
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h5 class="mb-0">Daftar Kartu</h5>
+            <a href="{{ route('admin.smartcard.setting-blokir-kartu.export', request()->query()) }}"
+               class="btn btn-sm btn-success">
+                <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+            </a>
+        </div>
         <div class="table-responsive">
             <table class="table table-sm table-bordered table-hover mb-0">
                 <thead class="table-light">

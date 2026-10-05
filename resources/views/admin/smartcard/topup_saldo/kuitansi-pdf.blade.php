@@ -13,10 +13,11 @@
         .num { text-align: right; font-weight: bold; }
         .box { border: 1px solid #ccc; padding: 10px; margin-top: 10px; }
         .foot { margin-top: 18px; text-align: right; }
+        .total { border-top: 1px solid #999; margin-top: 6px; padding-top: 6px; }
     </style>
 </head>
 <body>
-    <h2>{{ $sekolahNama ?? 'Al Multazam' }}</h2>
+    <h2>{{ $sekolahNama ?? 'Muallimaat' }}</h2>
     <div class="muted">Kuitansi TOP UP Uang Saku</div>
 
     <div class="box">
@@ -33,20 +34,12 @@
 
     <table>
         <tr>
-            <td>Nominal bayar</td>
-            <td class="num">Rp {{ number_format((int)$nominal, 0, ',', '.') }}</td>
+            <td>Nominal TOP UP</td>
+            <td class="num">Rp {{ number_format((int) $nominal, 0, ',', '.') }}</td>
         </tr>
-        <tr>
-            <td>TOP UP</td>
-            <td class="num">Rp {{ number_format((int) max(0, $nominal - $fee), 0, ',', '.') }}</td>
-        </tr>
-        <tr>
-            <td>Admin fee</td>
-            <td class="num">Rp {{ number_format((int)$fee, 0, ',', '.') }}</td>
-        </tr>
-        <tr>
+        <tr class="total">
             <td>Masuk saldo</td>
-            <td class="num">Rp {{ number_format((int)$nominal, 0, ',', '.') }}</td>
+            <td class="num">Rp {{ number_format((int) ($saldoDidapat ?? $nominal), 0, ',', '.') }}</td>
         </tr>
     </table>
 

@@ -40,9 +40,10 @@
                         <label class="form-label" for="noKartuInput">No Kartu</label>
                         <div class="input-group">
                             <input type="text" class="form-control" id="noKartuInput" name="no_kartu"
-                                   value="{{ $noKartu ?? '' }}" placeholder="Isi manual / scan barcode" autocomplete="off">
+                                   value="{{ $noKartu ?? '' }}" placeholder="isi manual / tapping kartu rfid" autocomplete="off">
                             <button type="button" class="btn btn-outline-warning" id="btnScanBarcode" title="Scan barcode">Scan</button>
                         </div>
+                        <small class="text-muted">isi manual / tapping kartu rfid</small>
                         <div id="barcodeScannerWrap" class="border rounded p-2 mt-2 bg-light" hidden>
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <small class="fw-semibold">Arahkan kamera ke barcode kartu</small>
@@ -62,9 +63,21 @@
                         <input type="text" class="form-control" id="pinInput" name="pin"
                                value="{{ $pin ?? '123' }}" placeholder="123">
                     </div>
-                    <div class="col-12 d-flex gap-2">
+                    <div class="col-md-2">
+                        <label class="form-label" for="perPageInput">Tampil data</label>
+                        <select class="form-select" id="perPageInput" name="per_page">
+                            @foreach (($perPageOptions ?? [10, 25, 50, 100, 200]) as $opt)
+                                <option value="{{ $opt }}" @selected((int) ($perPage ?? 10) === (int) $opt)>{{ $opt }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="col-12 d-flex gap-2 flex-wrap">
                         <button type="submit" class="btn btn-outline-primary">Lihat</button>
                         <button type="submit" class="btn btn-primary" form="formSave">Simpan</button>
+                        <a href="{{ route('admin.smartcard.data-kartu-siswa.export', request()->query()) }}"
+                           class="btn btn-success">
+                            <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                        </a>
                         <a href="{{ route('admin.smartcard.data-kartu-siswa.index') }}" class="btn btn-outline-secondary">Reset</a>
                     </div>
                 </div>
@@ -80,11 +93,17 @@
     </div>
 
     <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
             <h5 class="mb-0">Daftar Kartu Siswa</h5>
-            @if ($isSearch ?? false)
-                <small class="text-muted">hasil pencarian</small>
-            @endif
+            <div class="d-flex align-items-center gap-2">
+                @if (isset($kartuRows) && method_exists($kartuRows, 'total'))
+                    <small class="text-muted">{{ number_format($kartuRows->total() ?? 0, 0, ',', '.') }} data</small>
+                @endif
+                <a href="{{ route('admin.smartcard.data-kartu-siswa.export', request()->query()) }}"
+                   class="btn btn-sm btn-success">
+                    <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                </a>
+            </div>
         </div>
         <div class="table-responsive">
             <table class="table table-sm table-bordered table-hover mb-0">

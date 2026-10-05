@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Admin\Smartcard;
 
 use App\Http\Controllers\Controller;
+use App\Support\SmartcardExcelExport;
+use App\Support\SmartcardSaldo;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -15,13 +17,16 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Keluar Uang Saku — port builder PENGELUARAN UANG SAKU.
- * Cash Keluar: sccttran (FROM SALDO / CASH) + scctcashout (FIDBANK=CASH).
+ * Keluar Uang Saku — Muallimaat.
+ * Cash Keluar: sccttran (REFFBANK=24, FIDBANK=CASH) + scctcashout (FIDBANK=CASH, Teller/users=cyber_key.users).
  */
 class KeluarUangSakuController extends Controller
 {
+    private const REFFBANK = '24';
+
     public function index(Request $request): View
     {
         $custid = (int) $request->query('custid', 0);
@@ -75,6 +80,11 @@ class KeluarUangSakuController extends Controller
             'lastTransNo' => session('keluar_uang_saku_transno', ''),
             'searchUrl' => route('admin.smartcard.keluar-uang-saku.siswa-search'),
             'detailUrl' => route('admin.smartcard.keluar-uang-saku.siswa-detail'),
+            'exportUrl' => route('admin.smartcard.keluar-uang-saku.export', array_filter([
+                'custid' => $custid > 0 ? $custid : null,
+                'nama' => $nama !== '' ? $nama : null,
+                'q' => trim((string) $request->query('q', '')) ?: null,
+            ])),
         ]);
     }
 
@@ -213,8 +223,8 @@ class KeluarUangSakuController extends Controller
         }
 
         $trxDate = $this->resolveTrxDate($tglManual);
-        $transNo = $this->generateTransNo(now()); // builder: tgl = CurDate() & Form2.TRANSNO
-        $teller = $this->currentUserLabel();
+        $transNo = $this->generateTransNo(now());
+        $loginUser = $this->currentLoginUsers();
 
         try {
             DB::connection('DATA_MYSQL')->transaction(function () use (
@@ -223,12 +233,12 @@ class KeluarUangSakuController extends Controller
                 $ket,
                 $trxDate,
                 $transNo,
-                $teller
+                $loginUser
             ) {
                 $tranRow = [
                     'CUSTID' => $custid,
                     'NOREFF' => $transNo,
-                    'REFFBANK' => '38',
+                    'REFFBANK' => self::REFFBANK,
                     'TRXDATE' => $trxDate->format('Y-m-d H:i:s'),
                     'KDCHANNEL' => 11,
                     'DEBET' => $nominal,
@@ -242,16 +252,22 @@ class KeluarUangSakuController extends Controller
                 if ($this->hasColumn('sccttran', 'Keterangan')) {
                     $tranRow['Keterangan'] = $ket !== '' ? $ket : null;
                 }
+                if ($this->hasColumn('sccttran', 'HELPDESK')) {
+                    $tranRow['HELPDESK'] = 'User: ' . $loginUser;
+                }
                 DB::connection('DATA_MYSQL')->table('sccttran')->insert($tranRow);
 
                 $cashRow = [
                     'CUSTID' => $custid,
                     'BILLAM' => $nominal,
                     'TanggalKeluar' => $trxDate->format('Y-m-d H:i:s'),
-                    'Teller' => $teller,
+                    'Teller' => $loginUser,
                     'TRANSNO' => $transNo,
                     'FIDBANK' => 'CASH',
                 ];
+                if ($this->hasColumn('scctcashout', 'users')) {
+                    $cashRow['users'] = $loginUser;
+                }
                 if ($this->hasColumn('scctcashout', 'Keterangan')) {
                     $cashRow['Keterangan'] = $ket !== '' ? $ket : null;
                 }
@@ -296,11 +312,103 @@ class KeluarUangSakuController extends Controller
             'tranRows' => $tranRows,
             'totalMasuk' => $totalMasuk,
             'totalKeluar' => $totalKeluar,
-            'teller' => $this->currentUserLabel(),
+            'teller' => $this->currentLoginUsers(),
             'printedAt' => now(),
         ])->setPaper('a4', 'portrait');
 
         return $pdf->stream('transaksi-siswa-' . ($siswa->nis ?: $custid) . '.pdf');
+    }
+
+    public function export(Request $request): StreamedResponse|RedirectResponse
+    {
+        $custid = (int) $request->query('custid', 0);
+        $namaFilter = trim((string) $request->query('nama', $request->query('q', '')));
+
+        if ($custid <= 0 && $namaFilter === '') {
+            return redirect()
+                ->route('admin.smartcard.keluar-uang-saku.index')
+                ->with('smartcard_error', 'Pilih siswa atau cari nama terlebih dahulu untuk export.');
+        }
+
+        $query = DB::connection('DATA_MYSQL')
+            ->table('scctcashout as co')
+            ->join('scctcust as c', 'co.CUSTID', '=', 'c.CUSTID')
+            ->whereRaw('UPPER(TRIM(co.FIDBANK)) = ?', ['CASH']);
+
+        $this->applySchoolScope($query, 'c');
+
+        if ($custid > 0) {
+            $query->where('co.CUSTID', $custid);
+        } elseif ($namaFilter !== '') {
+            $query->where(function ($w) use ($namaFilter) {
+                $w->where('c.NMCUST', 'like', '%' . $namaFilter . '%')
+                    ->orWhere('c.NOCUST', 'like', '%' . $namaFilter . '%');
+            });
+        }
+
+        $userParts = [];
+        if ($this->hasColumn('scctcashout', 'users')) {
+            $userParts[] = "NULLIF(TRIM(co.users), '')";
+        }
+        $userParts[] = "NULLIF(TRIM(co.Teller), '')";
+        $userExpr = 'COALESCE(' . implode(', ', $userParts) . ", '-')";
+
+        $rows = $query
+            ->orderByDesc('co.TanggalKeluar')
+            ->limit(5000)
+            ->get([
+                'c.NOCUST as nis',
+                'c.NMCUST as nama',
+                'co.TRANSNO as no_transaksi',
+                'co.TanggalKeluar as tgl_transaksi',
+                'co.BILLAM as jumlah',
+                DB::raw("{$userExpr} as user_login"),
+            ]);
+
+        if ($rows->isEmpty()) {
+            return redirect()
+                ->route('admin.smartcard.keluar-uang-saku.index', array_filter([
+                    'custid' => $custid > 0 ? $custid : null,
+                    'search' => $namaFilter !== '' ? 1 : null,
+                    'q' => $namaFilter !== '' ? $namaFilter : null,
+                ]))
+                ->with('smartcard_error', 'Tidak ada data cash keluar untuk diexport.');
+        }
+
+        $exportRows = [];
+        $no = 1;
+        $total = 0;
+        $siswaNama = trim((string) ($rows->first()->nama ?? 'siswa'));
+        foreach ($rows as $row) {
+            $jumlah = (int) ($row->jumlah ?? 0);
+            $total += $jumlah;
+            $tgl = '';
+            if (!empty($row->tgl_transaksi)) {
+                try {
+                    $tgl = Carbon::parse($row->tgl_transaksi)->format('Y-m-d H:i:s');
+                } catch (\Throwable) {
+                    $tgl = (string) $row->tgl_transaksi;
+                }
+            }
+            $exportRows[] = [
+                $no++,
+                $row->nis ?? '',
+                $row->nama ?? '',
+                $row->no_transaksi ?? '',
+                $tgl,
+                $jumlah,
+                $row->user_login ?? '',
+            ];
+        }
+        $exportRows[] = ['', '', '', '', 'TOTAL', $total, ''];
+
+        $safeName = preg_replace('/[^A-Za-z0-9_-]+/', '-', $siswaNama) ?: 'siswa';
+
+        return SmartcardExcelExport::download(
+            'keluar-uang-saku-' . $safeName . '-' . date('Ymd-His'),
+            ['No', 'NIS', 'Nama', 'No Transaksi', 'Tgl Keluar', 'Jumlah', 'User'],
+            $exportRows
+        );
     }
 
     private function fetchSiswaByCustid(int $custid): ?object
@@ -331,8 +439,13 @@ class KeluarUangSakuController extends Controller
 
     private function fetchSiswaList(string $q): Collection
     {
+        if (!SmartcardSaldo::hasView()) {
+            return collect();
+        }
+
         try {
-            $query = DB::connection('DATA_MYSQL')->table('v_saldo_va as v');
+            $view = SmartcardSaldo::VIEW;
+            $query = DB::connection('DATA_MYSQL')->table("{$view} as v");
             $this->applySchoolScope($query, 'v');
 
             if ($q !== '') {
@@ -373,55 +486,16 @@ class KeluarUangSakuController extends Controller
 
     private function fetchSaldo(int $custid): int
     {
-        $map = $this->fetchSaldoMap([$custid]);
-
-        return (int) ($map[$custid] ?? 0);
-    }
-
-    /**
-     * @param  list<int>  $custids
-     * @return array<int, int>
-     */
-    private function fetchSaldoMap(array $custids): array
-    {
-        $custids = array_values(array_unique(array_filter(array_map('intval', $custids))));
-        if ($custids === []) {
-            return [];
-        }
-
-        try {
-            $rows = DB::connection('DATA_MYSQL')
-                ->table('v_saldo_va')
-                ->whereIn('CUSTID', $custids)
-                ->get(['CUSTID', 'SALDO']);
-
-            $map = [];
-            foreach ($rows as $row) {
-                $map[(int) $row->CUSTID] = (int) ($row->SALDO ?? 0);
-            }
-
-            return $map;
-        } catch (\Throwable) {
-        }
-
-        $rows = DB::connection('DATA_MYSQL')
-            ->table('sccttran')
-            ->whereIn('CUSTID', $custids)
-            ->groupBy('CUSTID')
-            ->selectRaw('CUSTID, CAST(COALESCE(SUM(KREDIT),0) AS SIGNED) - CAST(COALESCE(SUM(DEBET),0) AS SIGNED) as saldo')
-            ->get();
-
-        $map = [];
-        foreach ($rows as $row) {
-            $map[(int) $row->CUSTID] = (int) ($row->saldo ?? 0);
-        }
-
-        return $map;
+        return SmartcardSaldo::for($custid);
     }
 
     private function fetchCashoutRows(int $custid): Collection
     {
+        $hasUsers = $this->hasColumn('scctcashout', 'users');
         $cols = ['TanggalKeluar', 'BILLAM', 'Teller', 'TRANSNO'];
+        if ($hasUsers) {
+            $cols[] = 'users';
+        }
         if ($this->hasColumn('scctcashout', 'Keterangan')) {
             $cols[] = 'Keterangan';
         }
@@ -434,11 +508,16 @@ class KeluarUangSakuController extends Controller
             ->orderByDesc('urut')
             ->limit(50)
             ->get($cols)
-            ->map(function ($r) {
+            ->map(function ($r) use ($hasUsers) {
+                $user = $hasUsers ? trim((string) ($r->users ?? '')) : '';
+                if ($user === '') {
+                    $user = trim((string) ($r->Teller ?? ''));
+                }
+
                 return (object) [
                     'tanggal' => $this->fmtDate($r->TanggalKeluar ?? null),
                     'jumlah' => (int) ($r->BILLAM ?? 0),
-                    'teller' => trim((string) ($r->Teller ?? '')),
+                    'teller' => $user,
                     'transno' => trim((string) ($r->TRANSNO ?? '')),
                     'keterangan' => trim((string) ($r->Keterangan ?? '')),
                 ];
@@ -543,13 +622,20 @@ class KeluarUangSakuController extends Controller
         }
     }
 
-    private function currentUserLabel(): string
+    /** Login username dari cyber_key.users (bukan ket/nama). */
+    private function currentLoginUsers(): string
     {
         $user = Auth::user();
         if (!$user) {
             return 'ADMIN';
         }
-        foreach (['username', 'name', 'email'] as $field) {
+
+        $login = trim((string) ($user->users ?? ''));
+        if ($login !== '') {
+            return $login;
+        }
+
+        foreach (['username', 'email'] as $field) {
             $val = trim((string) ($user->{$field} ?? ''));
             if ($val !== '') {
                 return $val;

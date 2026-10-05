@@ -77,6 +77,10 @@
                         <button type="submit" class="btn btn-primary" id="btnTopup" disabled>TOPUP</button>
                         <button type="submit" class="btn btn-outline-secondary" form="formCetak"
                                 @disabled((int)($custid ?? 0) <= 0)>Cetak Kuitansi</button>
+                        <a href="{{ $exportUrl ?? route('admin.smartcard.topup-saldo.export', array_filter(['custid' => (int) ($custid ?? 0) ?: null, 'nama' => $nama ?? null])) }}"
+                           class="btn btn-success @if((int)($custid ?? 0) <= 0 && trim((string)($nama ?? '')) === '') disabled @endif">
+                            <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                        </a>
                         <a href="{{ route('admin.smartcard.topup-saldo.index') }}" class="btn btn-outline-secondary">Reset</a>
                     </div>
                 </div>
@@ -130,7 +134,15 @@
         </div>
         <div class="col-lg-6">
             <div class="card mb-3">
-                <div class="card-header"><h5 class="mb-0">Riwayat TOPUP</h5></div>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Riwayat TOPUP</h5>
+                    @if ((int) ($custid ?? 0) > 0)
+                        <a href="{{ route('admin.smartcard.topup-saldo.export', ['custid' => (int) $custid, 'nama' => $nama ?? '']) }}"
+                           class="btn btn-sm btn-success">
+                            <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                        </a>
+                    @endif
+                </div>
                 <div class="table-responsive" style="max-height:200px;">
                     <table class="table table-sm table-bordered mb-0">
                         <thead class="table-light">
@@ -194,7 +206,6 @@
 (function () {
     const searchUrl = @json($searchUrl);
     const detailUrl = @json($detailUrl);
-    const adminFee = {{ (int) $adminFee }};
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '{{ csrf_token() }}';
 
     const nisInput = document.getElementById('nisInput');
@@ -218,7 +229,7 @@
     function syncTopupBtn() {
         const nom = parseAmt(nominalInput.value);
         const cid = parseInt(custidEl.value || '0', 10);
-        btnTopup.disabled = !(nom > adminFee && cid > 0);
+        btnTopup.disabled = !(nom > 0 && cid > 0);
     }
 
     function closeLists() {
@@ -360,11 +371,6 @@
         if (!cid || nom <= 0) {
             e.preventDefault();
             alert('Nominal masih 0, atau NIS dan nama belum diisi');
-            return;
-        }
-        if (nom <= adminFee) {
-            e.preventDefault();
-            alert('Nominal harus lebih dari biaya admin Rp ' + fmt(adminFee));
             return;
         }
         // kirim angka bersih

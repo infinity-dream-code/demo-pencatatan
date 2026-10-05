@@ -67,6 +67,10 @@
                         <button type="submit" class="btn btn-danger" id="btnCashKeluar" disabled>Cash Keluar</button>
                         <button type="submit" class="btn btn-outline-secondary" form="formCetak"
                                 @disabled((int)($custid ?? 0) <= 0)>Cetak Transaksi Siswa</button>
+                        <a href="{{ $exportUrl ?? route('admin.smartcard.keluar-uang-saku.export', array_filter(['custid' => (int) ($custid ?? 0) ?: null, 'nama' => $nama ?? null])) }}"
+                           class="btn btn-success @if((int)($custid ?? 0) <= 0 && trim((string)($nama ?? '')) === '') disabled @endif">
+                            <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                        </a>
                         <small class="text-muted ms-auto">Seq hari ini: <code id="seqBox">{{ $nextSeq ?? '00001' }}</code></small>
                     </div>
                 </div>
@@ -123,14 +127,22 @@
         </div>
         <div class="col-lg-5">
             <div class="card h-100">
-                <div class="card-header"><h5 class="mb-0">Cash Keluar (CASH)</h5></div>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Cash Keluar (CASH)</h5>
+                    @if ((int) ($custid ?? 0) > 0)
+                        <a href="{{ route('admin.smartcard.keluar-uang-saku.export', ['custid' => (int) $custid, 'nama' => $nama ?? '']) }}"
+                           class="btn btn-sm btn-success">
+                            <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                        </a>
+                    @endif
+                </div>
                 <div class="table-responsive" style="max-height:280px;">
                     <table class="table table-sm table-bordered mb-0">
                         <thead class="table-light sticky-top">
                         <tr>
                             <th>Tanggal Keluar</th>
                             <th class="text-end">Jumlah</th>
-                            <th>Teller</th>
+                            <th>User</th>
                         </tr>
                         </thead>
                         <tbody id="cashoutBody">
@@ -144,6 +156,15 @@
                             <tr><td colspan="3" class="text-center text-muted py-3">—</td></tr>
                         @endforelse
                         </tbody>
+                        @if (count($cashoutRows) > 0)
+                            <tfoot class="table-light">
+                            <tr>
+                                <th class="text-end">TOTAL</th>
+                                <th class="text-end">{{ number_format((int) collect($cashoutRows)->sum('jumlah'), 0, ',', '.') }}</th>
+                                <th></th>
+                            </tr>
+                            </tfoot>
+                        @endif
                     </table>
                 </div>
             </div>

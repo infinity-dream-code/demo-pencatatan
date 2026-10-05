@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin\Smartcard;
 
 use App\Http\Controllers\Controller;
+use App\Support\SmartcardExcelExport;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -10,16 +11,18 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DataKartuSiswaController extends Controller
 {
-    private const PER_PAGE = 10;
+    private const PER_PAGE_OPTIONS = [10, 25, 50, 100, 200];
 
     public function index(Request $request): View
     {
         $isSearch = $request->boolean('search');
         $custid = $isSearch ? (int) $request->query('custid', 0) : 0;
         $noKartu = $isSearch ? trim((string) $request->query('no_kartu', '')) : '';
+        $perPage = $this->resolvePerPage($request);
         $pin = trim((string) $request->query('pin', '123'));
         if ($pin === '') {
             $pin = '123';
@@ -45,14 +48,45 @@ class DataKartuSiswaController extends Controller
             'title' => 'smartCARD',
             'mainTitle' => 'Data Kartu Siswa',
             'dataTitle' => 'Data Kartu Siswa',
-            'kartuRows' => $this->fetchRows($custid, $noKartu, $isSearch),
+            'kartuRows' => $this->fetchRows($custid, $noKartu, $isSearch, $perPage),
             'isSearch' => $isSearch,
             'custid' => $custid,
             'noKartu' => $noKartu,
             'pin' => $pin,
             'nama' => $nama,
             'siswaLabel' => $siswaLabel,
+            'perPage' => $perPage,
+            'perPageOptions' => self::PER_PAGE_OPTIONS,
         ]);
+    }
+
+    public function export(Request $request): StreamedResponse
+    {
+        $isSearch = $request->boolean('search');
+        $custid = $isSearch ? (int) $request->query('custid', 0) : 0;
+        $noKartu = $isSearch ? trim((string) $request->query('no_kartu', '')) : '';
+
+        $rows = $this->baseQuery($custid, $noKartu, $isSearch)
+            ->orderByDesc('scctcust.NOCUST')
+            ->orderByDesc('sm_pin.PID')
+            ->get();
+
+        $exportRows = [];
+        $no = 1;
+        foreach ($rows as $row) {
+            $exportRows[] = [
+                $no++,
+                $row->nis ?? '',
+                $row->nama ?? '',
+                $row->no_kartu ?? '',
+            ];
+        }
+
+        return SmartcardExcelExport::download(
+            'data-kartu-siswa-' . date('Ymd-His'),
+            ['No', 'NIS', 'Nama', 'No Kartu'],
+            $exportRows
+        );
     }
 
     public function store(Request $request): RedirectResponse
@@ -158,7 +192,17 @@ class DataKartuSiswaController extends Controller
         return response()->json(['rows' => $rows]);
     }
 
-    private function fetchRows(int $custid, string $noKartu, bool $isSearch): LengthAwarePaginator
+    private function resolvePerPage(Request $request): int
+    {
+        $perPage = (int) $request->query('per_page', 10);
+        if (!in_array($perPage, self::PER_PAGE_OPTIONS, true)) {
+            return 10;
+        }
+
+        return $perPage;
+    }
+
+    private function baseQuery(int $custid, string $noKartu, bool $isSearch)
     {
         $query = DB::connection('DATA_MYSQL')
             ->table('sm_pin')
@@ -180,10 +224,15 @@ class DataKartuSiswaController extends Controller
             }
         }
 
-        return $query
+        return $query;
+    }
+
+    private function fetchRows(int $custid, string $noKartu, bool $isSearch, int $perPage): LengthAwarePaginator
+    {
+        return $this->baseQuery($custid, $noKartu, $isSearch)
             ->orderByDesc('scctcust.NOCUST')
             ->orderByDesc('sm_pin.PID')
-            ->paginate(self::PER_PAGE)
+            ->paginate($perPage)
             ->withQueryString();
     }
 

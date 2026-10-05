@@ -75,34 +75,42 @@
                         <input type="date" class="form-control" name="sampai_tanggal"
                                value="{{ ($filters['sampai_tanggal'] ?? '') !== '0000-00-00' ? ($filters['sampai_tanggal'] ?? '') : '' }}">
                     </div>
-                    <div class="col-md-6 d-flex align-items-end gap-2">
+                    <div class="col-md-3">
+                        <label class="form-label">Tampil data</label>
+                        <select class="form-select" name="per_page">
+                            @foreach (($perPageOptions ?? [10, 25, 50, 100, 200]) as $opt)
+                                <option value="{{ $opt }}" @selected((int) ($perPage ?? 25) === (int) $opt)>{{ $opt }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="col-md-6 d-flex align-items-end gap-2 flex-wrap">
                         <button type="submit" class="btn btn-primary">Cari</button>
-                        <button type="submit" form="rtFormCetak" class="btn btn-outline-primary" @disabled(!($isSearch ?? false))>
-                            Cetak Rekap
-                        </button>
+                        <a href="{{ route('admin.smartcard.rekap-keluar-uang-saku.export', array_merge(request()->query(), ['search' => 1])) }}"
+                           class="btn btn-success @if(!($isSearch ?? false)) disabled @endif">
+                            <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                        </a>
                         <a href="{{ route('admin.smartcard.rekap-keluar-uang-saku.index') }}" class="btn btn-outline-secondary">Reset</a>
                     </div>
                 </div>
-            </form>
-
-            <form method="POST" action="{{ route('admin.smartcard.rekap-keluar-uang-saku.cetak') }}" id="rtFormCetak" target="_blank" class="d-none">
-                @csrf
-                <input type="hidden" name="thn_angkatan" value="{{ $filters['thn_angkatan'] ?? '' }}">
-                <input type="hidden" name="kelas_id" value="{{ $filters['kelas_id'] ?? '' }}">
-                <input type="hidden" name="nis" value="{{ $filters['nis'] ?? '' }}">
-                <input type="hidden" name="nama" value="{{ $filters['nama'] ?? '' }}">
-                <input type="hidden" name="dari_tanggal" value="{{ $filters['dari_tanggal'] ?? '' }}">
-                <input type="hidden" name="sampai_tanggal" value="{{ $filters['sampai_tanggal'] ?? '' }}">
             </form>
         </div>
     </div>
 
     <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
             <h5 class="mb-0">Data Rekap Keluar Uang Saku</h5>
-            @if ($isSearch ?? false)
-                <small class="text-muted">{{ $rows->total() ?? 0 }} data</small>
-            @endif
+            <div class="d-flex align-items-center gap-3">
+                @if ($isSearch ?? false)
+                    <span class="badge bg-primary fs-6">
+                        Total Nominal: Rp {{ number_format((int) ($totals['debet'] ?? 0), 0, ',', '.') }}
+                    </span>
+                    <small class="text-muted">{{ $rows->total() ?? 0 }} data</small>
+                @endif
+                <a href="{{ route('admin.smartcard.rekap-keluar-uang-saku.export', array_merge(request()->query(), ['search' => 1])) }}"
+                   class="btn btn-sm btn-success @if(!($isSearch ?? false)) disabled @endif">
+                    <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                </a>
+            </div>
         </div>
         @if (!empty($errorMessage))
             <div class="alert alert-danger m-3 mb-0">{{ $errorMessage }}</div>
@@ -153,6 +161,15 @@
                     </tr>
                 @endforelse
                 </tbody>
+                @if (($isSearch ?? false) && ($rows->count() ?? 0) > 0)
+                    <tfoot class="table-light">
+                    <tr>
+                        <th colspan="5" class="text-end">TOTAL</th>
+                        <th class="text-end">{{ number_format((int) ($totals['debet'] ?? 0), 0, ',', '.') }}</th>
+                        <th colspan="3"></th>
+                    </tr>
+                    </tfoot>
+                @endif
             </table>
         </div>
         @if (($isSearch ?? false) && method_exists($rows, 'hasPages') && $rows->hasPages())

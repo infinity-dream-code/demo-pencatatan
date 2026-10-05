@@ -512,6 +512,7 @@ Route::prefix("admin")
                         Route::get("/", "index")->name("index");
                         Route::post("/", "store")->name("store");
                         Route::get("siswa-search", "siswaSearch")->name("siswa-search");
+                        Route::get("export", "export")->name("export");
                     });
 
                 Route::controller(\App\Http\Controllers\Admin\Smartcard\SettingBlokirKartuController::class)
@@ -520,6 +521,7 @@ Route::prefix("admin")
                     ->group(function () {
                         Route::get("/", "index")->name("index");
                         Route::post("/", "update")->name("update");
+                        Route::get("export", "export")->name("export");
                     });
 
                 Route::controller(\App\Http\Controllers\Admin\Smartcard\SettingBatasanKartuController::class)
@@ -528,10 +530,16 @@ Route::prefix("admin")
                     ->group(function () {
                         Route::get("/", "index")->name("index");
                         Route::post("/", "store")->name("store");
+                        Route::get("export", "export")->name("export");
                     });
 
-                Route::get("transaksi-belanja", [\App\Http\Controllers\Admin\Smartcard\TransaksiBelanjaController::class, "index"])
-                    ->name("transaksi-belanja.index");
+                Route::controller(\App\Http\Controllers\Admin\Smartcard\TransaksiBelanjaController::class)
+                    ->prefix("transaksi-belanja")
+                    ->name("transaksi-belanja.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::get("export", "export")->name("export");
+                    });
 
                 Route::controller(\App\Http\Controllers\Admin\Smartcard\RekapPencairanKantinController::class)
                     ->prefix("pencairan-kantin")
@@ -539,6 +547,7 @@ Route::prefix("admin")
                     ->group(function () {
                         Route::get("/", "index")->name("index");
                         Route::post("/", "store")->name("store");
+                        Route::get("export", "export")->name("export");
                     });
 
                 Route::controller(\App\Http\Controllers\Admin\Smartcard\RekapTopupController::class)
@@ -547,6 +556,7 @@ Route::prefix("admin")
                     ->group(function () {
                         Route::get("/", "index")->name("index");
                         Route::post("cetak", "printRekap")->name("cetak");
+                        Route::get("export", "export")->name("export");
                     });
 
                 Route::controller(\App\Http\Controllers\Admin\Smartcard\TopupSaldoController::class)
@@ -558,6 +568,7 @@ Route::prefix("admin")
                         Route::get("siswa-search", "siswaSearch")->name("siswa-search");
                         Route::get("siswa-detail", "siswaDetail")->name("siswa-detail");
                         Route::post("cetak", "cetakKuitansi")->name("cetak");
+                        Route::get("export", "export")->name("export");
                     });
 
                 Route::controller(\App\Http\Controllers\Admin\Smartcard\RekapKeluarUangSakuController::class)
@@ -565,7 +576,7 @@ Route::prefix("admin")
                     ->name("rekap-keluar-uang-saku.")
                     ->group(function () {
                         Route::get("/", "index")->name("index");
-                        Route::post("cetak", "printRekap")->name("cetak");
+                        Route::get("export", "export")->name("export");
                     });
 
                 Route::controller(\App\Http\Controllers\Admin\Smartcard\KeluarUangSakuController::class)
@@ -577,6 +588,7 @@ Route::prefix("admin")
                         Route::get("siswa-detail", "siswaDetail")->name("siswa-detail");
                         Route::post("store", "store")->name("store");
                         Route::post("cetak", "cetak")->name("cetak");
+                        Route::get("export", "export")->name("export");
                     });
 
                 Route::controller(\App\Http\Controllers\Admin\Smartcard\TapAmbilRutinController::class)

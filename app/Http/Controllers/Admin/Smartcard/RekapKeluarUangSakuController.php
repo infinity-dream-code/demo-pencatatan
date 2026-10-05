@@ -3,40 +3,51 @@
 namespace App\Http\Controllers\Admin\Smartcard;
 
 use App\Http\Controllers\Controller;
-use Barryvdh\DomPDF\Facade\Pdf;
+use App\Support\SmartcardExcelExport;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
+/**
+ * Rekap Keluar Uang Saku — dari scctcashout FIDBANK=CASH.
+ * Kolom User = Teller / users (login cyber_key.users).
+ */
 class RekapKeluarUangSakuController extends Controller
 {
-    private const PER_PAGE = 10;
+    private const PER_PAGE_OPTIONS = [10, 25, 50, 100, 200];
 
-    private const TRAN_TABLE = 'sccttran';
+    private const TABLE = 'scctcashout';
 
     public function index(Request $request): View
     {
         $isSearch = $request->boolean('search');
         $filters = $this->filtersFromRequest($request);
+        $perPage = $this->resolvePerPage($request);
 
         $thnAka = $this->fetchThnAka();
         $kelasOptions = $this->fetchKelasOptions();
 
-        $rows = new LengthAwarePaginator([], 0, self::PER_PAGE, 1, [
+        $rows = new LengthAwarePaginator([], 0, $perPage, 1, [
             'path' => $request->url(),
             'query' => $request->query(),
         ]);
         $totals = ['debet' => 0];
+        $errorMessage = null;
 
         if ($isSearch) {
-            $rows = $this->fetchRows($filters, $request);
-            $totals = $this->sumPageTotals($rows);
+            try {
+                $rows = $this->fetchRows($filters, $perPage);
+                $totals = $this->sumTotalsSql($filters);
+            } catch (\Throwable $e) {
+                $errorMessage = 'Gagal memuat data: ' . $e->getMessage();
+            }
         }
 
         return view('admin.smartcard.rekap_keluar_uang_saku.index', [
@@ -49,32 +60,57 @@ class RekapKeluarUangSakuController extends Controller
             'totals' => $totals,
             'thnAka' => $thnAka,
             'kelasOptions' => $kelasOptions,
+            'perPage' => $perPage,
+            'perPageOptions' => self::PER_PAGE_OPTIONS,
+            'errorMessage' => $errorMessage,
         ]);
     }
 
-    public function printRekap(Request $request): Response|RedirectResponse
+    public function export(Request $request): StreamedResponse|RedirectResponse
     {
         $filters = $this->filtersFromRequest($request);
 
-        $totalCount = (int) $this->baseQuery($filters)->count('t.CUSTID');
-        if ($totalCount <= 0) {
+        try {
+            $rows = $this->fetchAllRows($filters);
+            $totals = $this->sumTotalsSql($filters);
+        } catch (\Throwable $e) {
             return redirect()
                 ->route('admin.smartcard.rekap-keluar-uang-saku.index', array_merge($filters, ['search' => 1]))
-                ->with('smartcard_error', 'Tidak ada data rekap untuk dicetak.');
+                ->with('error', 'Gagal export: ' . $e->getMessage());
         }
 
-        $totals = $this->sumTotalsSql($filters);
-        $sekolahNama = $this->fetchSekolahNama();
-        $rows = $this->fetchAllRowsForPrint($filters);
+        $exportRows = [];
+        $no = 1;
+        foreach ($rows as $row) {
+            $tgl = '';
+            if (!empty($row->tgl_transaksi)) {
+                try {
+                    $tgl = Carbon::parse($row->tgl_transaksi)->format('Y-m-d H:i:s');
+                } catch (\Throwable) {
+                    $tgl = (string) $row->tgl_transaksi;
+                }
+            }
 
-        $pdf = Pdf::loadView('admin.smartcard.rekap_keluar_uang_saku.rekap-pdf', [
-            'sekolahNama' => $sekolahNama,
-            'filters' => $filters,
-            'rows' => $rows,
-            'totals' => $totals,
-        ])->setPaper('a4', 'landscape');
+            $exportRows[] = [
+                $no++,
+                $row->kelas ?? '',
+                $row->gender ?? '',
+                $row->lokasi ?? '',
+                $row->nis ?? '',
+                $row->nama ?? '',
+                (int) ($row->debet ?? 0),
+                $tgl,
+                $row->no_transaksi ?? '',
+                $row->user ?? '',
+            ];
+        }
+        $exportRows[] = ['', '', '', '', '', 'TOTAL', (int) ($totals['debet'] ?? 0), '', '', ''];
 
-        return $pdf->stream('rekap-keluar-uang-saku-' . date('Ymd-His') . '.pdf');
+        return SmartcardExcelExport::download(
+            'rekap-keluar-uang-saku-' . date('Ymd-His'),
+            ['No', 'Kelas', 'Gender', 'Lokasi', 'NIS', 'Nama', 'Keluar', 'Tgl Transaksi', 'No Transaksi', 'User'],
+            $exportRows
+        );
     }
 
     private function filtersFromRequest(Request $request): array
@@ -86,18 +122,38 @@ class RekapKeluarUangSakuController extends Controller
             'nama' => trim((string) $request->input('nama', $request->query('nama', ''))),
             'dari_tanggal' => trim((string) $request->input('dari_tanggal', $request->query('dari_tanggal', ''))),
             'sampai_tanggal' => trim((string) $request->input('sampai_tanggal', $request->query('sampai_tanggal', ''))),
+            'per_page' => (string) $this->resolvePerPage($request),
         ];
+    }
+
+    private function resolvePerPage(Request $request): int
+    {
+        $perPage = (int) $request->input('per_page', $request->query('per_page', 25));
+        if (!in_array($perPage, self::PER_PAGE_OPTIONS, true)) {
+            return 25;
+        }
+
+        return $perPage;
+    }
+
+    private function hasColumn(string $column): bool
+    {
+        try {
+            return Schema::connection('DATA_MYSQL')->hasColumn(self::TABLE, $column);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     private function baseQuery(array $filters)
     {
         $query = DB::connection('DATA_MYSQL')
-            ->table(self::TRAN_TABLE . ' as t')
-            ->join('scctcust', 't.CUSTID', '=', 'scctcust.CUSTID')
+            ->table(self::TABLE . ' as co')
+            ->join('scctcust', 'co.CUSTID', '=', 'scctcust.CUSTID')
             ->leftJoin('mst_kelas', DB::raw('CAST(mst_kelas.id AS CHAR)'), '=', DB::raw('TRIM(scctcust.CODE03)'))
             ->leftJoin('mst_sekolah', DB::raw('TRIM(mst_sekolah.CODE01)'), '=', DB::raw('TRIM(scctcust.CODE01)'))
-            ->whereRaw('UPPER(TRIM(t.FIDBANK)) = ?', ['CASH'])
-            ->where('t.DEBET', '>', 0);
+            ->whereRaw('UPPER(TRIM(co.FIDBANK)) = ?', ['CASH'])
+            ->where('co.BILLAM', '>', 0);
 
         $this->applySchoolScope($query);
         $this->applyFilters($query, $filters);
@@ -107,123 +163,72 @@ class RekapKeluarUangSakuController extends Controller
 
     private function selectColumns(): array
     {
+        $userParts = [];
+        if ($this->hasColumn('users')) {
+            $userParts[] = "NULLIF(TRIM(co.users), '')";
+        }
+        if ($this->hasColumn('Teller')) {
+            $userParts[] = "NULLIF(TRIM(co.Teller), '')";
+        } elseif ($this->hasColumn('teller')) {
+            $userParts[] = "NULLIF(TRIM(co.teller), '')";
+        }
+        $userExpr = $userParts === []
+            ? "'-'"
+            : 'COALESCE(' . implode(', ', $userParts) . ", '-')";
+
         return [
-            't.CUSTID as custid',
+            'co.CUSTID as custid',
             'scctcust.NOCUST as nis',
             'scctcust.NMCUST as nama',
-            't.DEBET as debet',
-            't.TRXDATE as tgl_transaksi',
-            DB::raw('COALESCE(NULLIF(TRIM(t.TRANSNO), \'\'), NULLIF(TRIM(t.NOREFF), \'\'), \'-\') as no_transaksi'),
-            't.HELPDESK as helpdesk',
-            't.METODE as metode',
-            DB::raw('COALESCE(NULLIF(TRIM(mst_kelas.jenjang), \'\'), TRIM(scctcust.DESC02), \'-\') as kelas'),
-            DB::raw('COALESCE(NULLIF(TRIM(mst_kelas.kelas), \'\'), TRIM(scctcust.DESC03), \'-\') as kelompok'),
-            DB::raw('COALESCE(NULLIF(TRIM(scctcust.CODE04), \'\'), \'-\') as gender'),
-            DB::raw('COALESCE(NULLIF(TRIM(mst_sekolah.DESC01), \'\'), \'-\') as lokasi'),
+            'co.BILLAM as debet',
+            'co.TanggalKeluar as tgl_transaksi',
+            DB::raw("COALESCE(NULLIF(TRIM(co.TRANSNO), ''), '-') as no_transaksi"),
+            DB::raw("{$userExpr} as user_login"),
+            DB::raw("COALESCE(NULLIF(TRIM(mst_kelas.jenjang), ''), TRIM(scctcust.DESC02), '-') as kelas"),
+            DB::raw("COALESCE(NULLIF(TRIM(mst_kelas.kelas), ''), TRIM(scctcust.DESC03), '-') as kelompok"),
+            DB::raw("COALESCE(NULLIF(TRIM(scctcust.CODE04), ''), '-') as gender"),
+            DB::raw("COALESCE(NULLIF(TRIM(mst_sekolah.DESC01), ''), '-') as lokasi"),
         ];
     }
 
-    private function fetchRows(array $filters, Request $request): LengthAwarePaginator
+    private function fetchRows(array $filters, int $perPage): LengthAwarePaginator
     {
-        $paginator = $this->baseQuery($filters)
+        return $this->baseQuery($filters)
             ->select($this->selectColumns())
-            ->orderByDesc('t.TRXDATE')
-            ->orderByDesc('t.urut')
-            ->paginate(self::PER_PAGE)
-            ->withQueryString();
-
-        $saldoMap = $this->fetchSaldoMap(
-            collect($paginator->items())
-                ->pluck('custid')
-                ->map(static fn ($id) => (int) $id)
-                ->filter(static fn ($id) => $id > 0)
-                ->unique()
-                ->values()
-                ->all()
-        );
-
-        return $paginator->through(function ($row) use ($saldoMap) {
-            return $this->mapRow($row, $saldoMap);
-        });
+            ->orderByDesc('co.TanggalKeluar')
+            ->orderByDesc('co.urut')
+            ->paginate($perPage)
+            ->withQueryString()
+            ->through(fn ($row) => $this->mapRow($row));
     }
 
-    /** @param array<int, int> $saldoMap */
-    private function mapRow(object $row, array $saldoMap): object
+    private function mapRow(object $row): object
     {
-        $row->saldo = $saldoMap[(int) ($row->custid ?? 0)] ?? 0;
-        $row->user = $this->parseUser((string) ($row->helpdesk ?? ''));
+        $row->user = trim((string) ($row->user_login ?? '')) !== ''
+            ? trim((string) $row->user_login)
+            : '-';
 
         return $row;
-    }
-
-    /** @return array{debet: int} */
-    private function sumPageTotals(LengthAwarePaginator $paginator): array
-    {
-        $debet = 0;
-        foreach ($paginator->items() as $row) {
-            $debet += (int) ($row->debet ?? 0);
-        }
-
-        return ['debet' => $debet];
     }
 
     /** @return array{debet: int} */
     private function sumTotalsSql(array $filters): array
     {
         $row = $this->baseQuery($filters)
-            ->selectRaw('CAST(COALESCE(SUM(t.DEBET), 0) AS SIGNED) as debet_sum')
+            ->selectRaw('CAST(COALESCE(SUM(co.BILLAM), 0) AS SIGNED) as debet_sum')
             ->first();
 
         return ['debet' => (int) ($row->debet_sum ?? 0)];
     }
 
-    private function fetchAllRowsForPrint(array $filters): Collection
+    private function fetchAllRows(array $filters): Collection
     {
-        $rows = $this->baseQuery($filters)
+        return $this->baseQuery($filters)
             ->select($this->selectColumns())
-            ->orderByDesc('t.TRXDATE')
-            ->orderByDesc('t.urut')
-            ->get();
-
-        $saldoMap = $this->fetchSaldoMap(
-            $rows->pluck('custid')
-                ->map(static fn ($id) => (int) $id)
-                ->filter(static fn ($id) => $id > 0)
-                ->unique()
-                ->values()
-                ->all()
-        );
-
-        return $rows->map(fn ($row) => $this->mapRow($row, $saldoMap));
-    }
-
-    /** @param list<int> $custids */
-    private function fetchSaldoMap(array $custids): array
-    {
-        if ($custids === []) {
-            return [];
-        }
-
-        return DB::connection('DATA_MYSQL')
-            ->table(self::TRAN_TABLE)
-            ->whereIn('CUSTID', $custids)
-            ->selectRaw('CUSTID, CAST(COALESCE(SUM(KREDIT), 0) AS SIGNED) - CAST(COALESCE(SUM(DEBET), 0) AS SIGNED) AS saldo')
-            ->groupBy('CUSTID')
-            ->pluck('saldo', 'CUSTID')
-            ->map(static fn ($saldo) => (int) $saldo)
-            ->all();
-    }
-
-    private function parseUser(string $helpdesk): string
-    {
-        if (preg_match('/User:\s*([^\s|]+)/i', $helpdesk, $m)) {
-            $user = trim($m[1]);
-            if ($user !== '') {
-                return $user;
-            }
-        }
-
-        return '-';
+            ->orderByDesc('co.TanggalKeluar')
+            ->orderByDesc('co.urut')
+            ->get()
+            ->map(fn ($row) => $this->mapRow($row));
     }
 
     private function applySchoolScope($query): void
@@ -256,14 +261,14 @@ class RekapKeluarUangSakuController extends Controller
         if ($filters['dari_tanggal'] !== '') {
             $from = $this->parseDate($filters['dari_tanggal']);
             if ($from) {
-                $query->where('t.TRXDATE', '>=', $from->startOfDay());
+                $query->where('co.TanggalKeluar', '>=', $from->startOfDay());
             }
         }
 
         if ($filters['sampai_tanggal'] !== '') {
             $to = $this->parseDate($filters['sampai_tanggal']);
             if ($to) {
-                $query->where('t.TRXDATE', '<=', $to->endOfDay());
+                $query->where('co.TanggalKeluar', '<=', $to->endOfDay());
             }
         }
 
@@ -366,29 +371,5 @@ class RekapKeluarUangSakuController extends Controller
         } catch (\Throwable) {
             return [];
         }
-    }
-
-    private function fetchSekolahNama(): string
-    {
-        $unit = trim((string) (Auth::user()->unit ?? ''));
-        if ($unit !== '') {
-            try {
-                $nama = DB::connection('DATA_MYSQL')
-                    ->table('mst_sekolah')
-                    ->where(function ($q) use ($unit) {
-                        $q->whereRaw('TRIM(CODE01) = ?', [$unit])
-                            ->orWhereRaw('TRIM(DESC01) = ?', [$unit]);
-                    })
-                    ->value('DESC01');
-
-                if ($nama !== null && trim((string) $nama) !== '') {
-                    return trim((string) $nama);
-                }
-            } catch (\Throwable) {
-                // ignore
-            }
-        }
-
-        return (string) config('app.name', 'SIKEU');
     }
 }

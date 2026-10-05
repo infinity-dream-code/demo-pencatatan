@@ -75,11 +75,15 @@
                         <input type="date" class="form-control" name="sampai_tanggal"
                                value="{{ ($filters['sampai_tanggal'] ?? '') !== '0000-00-00' ? ($filters['sampai_tanggal'] ?? '') : '' }}">
                     </div>
-                    <div class="col-md-6 d-flex align-items-end gap-2">
+                    <div class="col-md-6 d-flex align-items-end gap-2 flex-wrap">
                         <button type="submit" class="btn btn-primary">Cari</button>
                         <button type="submit" form="rtFormCetak" class="btn btn-outline-primary" @disabled(!($isSearch ?? false))>
                             Cetak Rekap
                         </button>
+                        <a href="{{ route('admin.smartcard.rekap-topup.export', array_merge(request()->query(), ['search' => 1])) }}"
+                           class="btn btn-success">
+                            <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                        </a>
                         <a href="{{ route('admin.smartcard.rekap-topup.index') }}" class="btn btn-outline-secondary">Reset</a>
                     </div>
                 </div>
@@ -98,11 +102,20 @@
     </div>
 
     <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
             <h5 class="mb-0">Data Rekap TOPUP</h5>
-            @if ($isSearch ?? false)
-                <small class="text-muted">{{ $rows->total() ?? 0 }} data</small>
-            @endif
+            <div class="d-flex align-items-center gap-3">
+                @if ($isSearch ?? false)
+                    <span class="badge bg-primary fs-6">
+                        Total Nominal: Rp {{ number_format((int) ($totals['topup'] ?? 0), 0, ',', '.') }}
+                    </span>
+                    <small class="text-muted">{{ $rows->total() ?? 0 }} data</small>
+                @endif
+                <a href="{{ route('admin.smartcard.rekap-topup.export', array_merge(request()->query(), ['search' => 1])) }}"
+                   class="btn btn-sm btn-success">
+                    <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                </a>
+            </div>
         </div>
         @if (!empty($errorMessage))
             <div class="alert alert-danger m-3 mb-0">{{ $errorMessage }}</div>
@@ -153,6 +166,15 @@
                     </tr>
                 @endforelse
                 </tbody>
+                @if (($isSearch ?? false) && method_exists($rows, 'count') && $rows->count() > 0)
+                    <tfoot class="table-light">
+                    <tr>
+                        <th colspan="5" class="text-end">Total Nominal</th>
+                        <th class="text-end">{{ number_format((int) ($totals['topup'] ?? 0), 0, ',', '.') }}</th>
+                        <th colspan="3"></th>
+                    </tr>
+                    </tfoot>
+                @endif
             </table>
         </div>
         @if (($isSearch ?? false) && method_exists($rows, 'hasPages') && $rows->hasPages())

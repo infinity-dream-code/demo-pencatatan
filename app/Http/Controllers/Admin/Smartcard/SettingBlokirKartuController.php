@@ -3,12 +3,14 @@
 namespace App\Http\Controllers\Admin\Smartcard;
 
 use App\Http\Controllers\Controller;
+use App\Support\SmartcardExcelExport;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class SettingBlokirKartuController extends Controller
 {
@@ -53,6 +55,52 @@ class SettingBlokirKartuController extends Controller
             'siswaLabel' => $siswaLabel,
             'searchError' => $searchError,
         ]);
+    }
+
+    public function export(Request $request): StreamedResponse
+    {
+        $custid = (int) $request->query('custid', 0);
+
+        $query = DB::connection('DATA_MYSQL')
+            ->table('sm_pin')
+            ->join('scctcust', 'sm_pin.CUSTID', '=', 'scctcust.CUSTID')
+            ->select([
+                'scctcust.NOCUST as nis',
+                'scctcust.NMCUST as nama',
+                'sm_pin.PID as no_kartu',
+                'sm_pin.PIN as pin',
+                'sm_pin.BLOKIR as blokir',
+            ]);
+
+        $this->applySchoolScope($query, 'scctcust');
+
+        if ($custid > 0) {
+            $query->where('sm_pin.CUSTID', $custid);
+        }
+
+        $rows = $query
+            ->orderBy('scctcust.NOCUST')
+            ->orderBy('sm_pin.PID')
+            ->get();
+
+        $exportRows = [];
+        $no = 1;
+        foreach ($rows as $row) {
+            $exportRows[] = [
+                $no++,
+                $row->nis ?? '',
+                $row->nama ?? '',
+                $row->no_kartu ?? '',
+                $row->pin ?? '',
+                ((int) ($row->blokir ?? 0) === 1) ? 'Diblokir' : 'Aktif',
+            ];
+        }
+
+        return SmartcardExcelExport::download(
+            'setting-blokir-kartu-' . date('Ymd-His'),
+            ['No', 'NIS', 'Nama', 'No Kartu', 'PIN', 'Status'],
+            $exportRows
+        );
     }
 
     public function update(Request $request): RedirectResponse

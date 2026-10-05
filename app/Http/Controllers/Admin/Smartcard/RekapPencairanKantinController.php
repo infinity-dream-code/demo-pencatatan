@@ -3,14 +3,17 @@
 namespace App\Http\Controllers\Admin\Smartcard;
 
 use App\Http\Controllers\Controller;
+use App\Support\SmartcardExcelExport;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class RekapPencairanKantinController extends Controller
 {
@@ -18,34 +21,45 @@ class RekapPencairanKantinController extends Controller
 
     public function index(Request $request): View
     {
-        $kdMercan = trim((string) $request->query('kd_mercan', ''));
-        $dariTanggal = trim((string) $request->query('dari_tanggal', ''));
-        $sampaiTanggal = trim((string) $request->query('sampai_tanggal', ''));
-        $namaPenerima = trim((string) $request->query('nama_penerima', ''));
-        $nominal = trim((string) $request->query('nominal', ''));
+        $kdMercan = trim((string) $request->query('kd_mercan', old('kd_mercan', '')));
+        $dariTanggal = trim((string) $request->query('dari_tanggal', old('dari_tanggal', '')));
+        $sampaiTanggal = trim((string) $request->query('sampai_tanggal', old('sampai_tanggal', '')));
+        $namaPenerima = trim((string) $request->query('nama_penerima', old('nama_penerima', '')));
+        $nominal = trim((string) $request->query('nominal', old('nominal', '')));
 
         $cariTransaksi = $request->boolean('cari_transaksi');
         $liatPencairan = $request->boolean('liat_pencairan');
 
         $mercanOptions = $this->fetchMercanOptions();
+        $errorMessage = null;
 
         $transaksiRows = collect();
         $transaksiTotal = 0;
         if ($cariTransaksi) {
-            [$transaksiRows, $transaksiTotal] = $this->fetchTransaksiRows($kdMercan, $dariTanggal, $sampaiTanggal);
-            if ($nominal === '' && $transaksiTotal > 0) {
-                $nominal = (string) (int) round($transaksiTotal);
+            try {
+                [$transaksiRows, $transaksiTotal] = $this->fetchTransaksiRows($kdMercan, $dariTanggal, $sampaiTanggal);
+                if ($nominal === '' && $transaksiTotal > 0) {
+                    $nominal = (string) (int) round($transaksiTotal);
+                }
+            } catch (\Throwable $e) {
+                Log::error('Smartcard pencairan cari transaksi failed', ['message' => $e->getMessage()]);
+                $errorMessage = 'Gagal memuat transaksi: ' . $e->getMessage();
             }
         }
 
         $pencairanRows = collect();
         $pencairanTotal = 0;
         if ($liatPencairan) {
-            [$pencairanRows, $pencairanTotal] = $this->fetchPencairanRows(
-                $kdMercan,
-                $dariTanggal,
-                $sampaiTanggal
-            );
+            try {
+                [$pencairanRows, $pencairanTotal] = $this->fetchPencairanRows(
+                    $kdMercan,
+                    $dariTanggal,
+                    $sampaiTanggal
+                );
+            } catch (\Throwable $e) {
+                Log::error('Smartcard pencairan liat pencairan failed', ['message' => $e->getMessage()]);
+                $errorMessage = 'Gagal memuat data pencairan: ' . $e->getMessage();
+            }
         }
 
         return view('admin.smartcard.pencairan_kantin.index', [
@@ -54,8 +68,8 @@ class RekapPencairanKantinController extends Controller
             'dataTitle' => 'Rekap Pencairan Kantin',
             'mercanOptions' => $mercanOptions,
             'kdMercan' => $kdMercan,
-            'dariTanggal' => $dariTanggal,
-            'sampaiTanggal' => $sampaiTanggal,
+            'dariTanggal' => $dariTanggal === '0000-00-00' ? '' : $dariTanggal,
+            'sampaiTanggal' => $sampaiTanggal === '0000-00-00' ? '' : $sampaiTanggal,
             'namaPenerima' => $namaPenerima,
             'nominal' => $nominal,
             'cariTransaksi' => $cariTransaksi,
@@ -65,6 +79,7 @@ class RekapPencairanKantinController extends Controller
             'pencairanRows' => $pencairanRows,
             'pencairanTotal' => $pencairanTotal,
             'previewNoTerima' => $this->generateNoTerima(),
+            'errorMessage' => $errorMessage,
         ]);
     }
 
@@ -78,6 +93,11 @@ class RekapPencairanKantinController extends Controller
             'nominal' => ['required', 'integer', 'min:1'],
         ], [
             'kd_mercan.required' => 'Pilih merchant terlebih dahulu.',
+            'dari_tanggal.required' => 'Dari tanggal wajib diisi.',
+            'dari_tanggal.date' => 'Format dari tanggal tidak valid.',
+            'sampai_tanggal.required' => 'Sampai tanggal wajib diisi.',
+            'sampai_tanggal.date' => 'Format sampai tanggal tidak valid.',
+            'sampai_tanggal.after_or_equal' => 'Sampai tanggal harus sama atau setelah dari tanggal.',
             'nama_penerima.required' => 'Nama penerima wajib diisi.',
             'nominal.required' => 'Nominal wajib diisi.',
             'nominal.min' => 'Nominal harus lebih dari 0.',
@@ -99,7 +119,6 @@ class RekapPencairanKantinController extends Controller
             'akhir_tgl_tran' => $sampai->format('Y-m-d'),
         ];
 
-        // Al-Multazam: KDMERCAN sering NULL — simpan juga username agar Liat Pencairan cocok
         try {
             if (Schema::connection('DATA_MYSQL')->hasColumn('sm_mercan_cair', 'username')) {
                 $payload['username'] = $kdMercan;
@@ -122,16 +141,64 @@ class RekapPencairanKantinController extends Controller
             ->with('success', 'Data pencairan berhasil disimpan. No Terima: ' . $noTerima);
     }
 
+    public function export(Request $request): StreamedResponse|RedirectResponse
+    {
+        $kdMercan = trim((string) $request->query('kd_mercan', ''));
+        $dariTanggal = trim((string) $request->query('dari_tanggal', ''));
+        $sampaiTanggal = trim((string) $request->query('sampai_tanggal', ''));
+
+        try {
+            [$rows, $total] = $this->fetchPencairanRows($kdMercan, $dariTanggal, $sampaiTanggal);
+        } catch (\Throwable $e) {
+            return redirect()
+                ->route('admin.smartcard.pencairan-kantin.index', $request->query())
+                ->with('error', 'Gagal export pencairan: ' . $e->getMessage());
+        }
+
+        $exportRows = [];
+        $no = 1;
+        foreach ($rows as $row) {
+            $tgl = '';
+            if (!empty($row->tgl_terima) && (string) $row->tgl_terima !== '0000-00-00 00:00:00') {
+                try {
+                    $tgl = Carbon::parse($row->tgl_terima)->format('Y-m-d H:i:s');
+                } catch (\Throwable) {
+                    $tgl = (string) $row->tgl_terima;
+                }
+            }
+
+            $exportRows[] = [
+                $no++,
+                $tgl,
+                $row->nama_penerima ?? '',
+                (float) ($row->nominal ?? 0),
+                $row->no_terima ?? '',
+                $row->KDMERCAN ?? ($row->username ?? ''),
+            ];
+        }
+        $exportRows[] = ['', '', 'TOTAL', $total, '', ''];
+
+        return SmartcardExcelExport::download(
+            'rekap-pencairan-kantin-' . date('Ymd-His'),
+            ['No', 'Tgl Terima', 'Nama Penerima', 'Nominal', 'No Terima', 'Merchant'],
+            $exportRows
+        );
+    }
+
     /** Format: YYYYMMDD + urut 3 digit, contoh 20260607001 */
     private function generateNoTerima(): string
     {
         $prefix = now()->format('Ymd');
 
-        $last = DB::connection('DATA_MYSQL')
-            ->table('sm_mercan_cair')
-            ->whereRaw('TRIM(NoTerima) LIKE ?', [$prefix . '%'])
-            ->orderByDesc('NoTerima')
-            ->value('NoTerima');
+        try {
+            $last = DB::connection('DATA_MYSQL')
+                ->table('sm_mercan_cair')
+                ->whereRaw('TRIM(NoTerima) LIKE ?', [$prefix . '%'])
+                ->orderByDesc('NoTerima')
+                ->value('NoTerima');
+        } catch (\Throwable) {
+            $last = null;
+        }
 
         $seq = 1;
         if ($last !== null && $last !== '') {
@@ -169,9 +236,11 @@ class RekapPencairanKantinController extends Controller
             ];
         };
 
-        // 0) Username dari data pencairan (sumber utama Al-Multazam)
         try {
-            if (Schema::connection('DATA_MYSQL')->hasTable('sm_mercan_cair')) {
+            if (
+                Schema::connection('DATA_MYSQL')->hasTable('sm_mercan_cair')
+                && Schema::connection('DATA_MYSQL')->hasColumn('sm_mercan_cair', 'username')
+            ) {
                 $rows = $db->table('sm_mercan_cair')
                     ->whereNotNull('username')
                     ->where('username', '!=', '')
@@ -186,7 +255,6 @@ class RekapPencairanKantinController extends Controller
             // continue
         }
 
-        // 1) Master merchant
         try {
             if (Schema::connection('DATA_MYSQL')->hasTable('sm_mercan')) {
                 $rows = $db->table('sm_mercan')
@@ -205,7 +273,6 @@ class RekapPencairanKantinController extends Controller
             // continue
         }
 
-        // 2) Master kantin (KDMERCAN atau username)
         try {
             if (Schema::connection('DATA_MYSQL')->hasTable('sm_kantin')) {
                 $rows = $db->table('sm_kantin')->orderBy('NamaKantin')->get();
@@ -222,7 +289,6 @@ class RekapPencairanKantinController extends Controller
             // continue
         }
 
-        // 3) Fallback: Teller unik dari scctcashout (BUY) — live only
         if ($options === []) {
             try {
                 $tellers = $db->table('scctcashout')
@@ -239,6 +305,23 @@ class RekapPencairanKantinController extends Controller
             } catch (\Throwable) {
                 // ignore
             }
+        }
+
+        // Juga ambil dari KDMERCAN di sm_mercan_cair
+        try {
+            if (Schema::connection('DATA_MYSQL')->hasTable('sm_mercan_cair')) {
+                $rows = $db->table('sm_mercan_cair')
+                    ->whereNotNull('KDMERCAN')
+                    ->where('KDMERCAN', '!=', '')
+                    ->distinct()
+                    ->orderBy('KDMERCAN')
+                    ->pluck('KDMERCAN');
+                foreach ($rows as $k) {
+                    $push((string) $k, (string) $k);
+                }
+            }
+        } catch (\Throwable) {
+            // ignore
         }
 
         usort($options, static fn ($a, $b) => strcasecmp($a->nama, $b->nama));
@@ -265,7 +348,6 @@ class RekapPencairanKantinController extends Controller
         $this->applySchoolScope($query);
 
         if ($kdMercan !== '') {
-            // Bisa kode merchant ATAU username teller kantin
             $query->where(function ($q) use ($kdMercan) {
                 $q->whereRaw('TRIM(COALESCE(sm_kantin.KDMERCAN, \'\')) = ?', [$kdMercan])
                     ->orWhereRaw('TRIM(COALESCE(sm_kantin.username, \'\')) = ?', [$kdMercan])
@@ -317,22 +399,28 @@ class RekapPencairanKantinController extends Controller
      */
     private function fetchPencairanRows(string $kdMercan, string $dari, string $sampai): array
     {
-        $query = DB::connection('DATA_MYSQL')
-            ->table('sm_mercan_cair')
-            ->orderByDesc('TglTerima')
-            ->orderByDesc('urut');
+        if (!Schema::connection('DATA_MYSQL')->hasTable('sm_mercan_cair')) {
+            return [collect(), 0.0];
+        }
 
-        // Di Al-Multazam KDMERCAN sering NULL — kunci merchant = username
+        $hasUsername = Schema::connection('DATA_MYSQL')->hasColumn('sm_mercan_cair', 'username');
+        $hasUrut = Schema::connection('DATA_MYSQL')->hasColumn('sm_mercan_cair', 'urut');
+        $hasDariTgl = Schema::connection('DATA_MYSQL')->hasColumn('sm_mercan_cair', 'dari_tgl_tran');
+        $hasAkhirTgl = Schema::connection('DATA_MYSQL')->hasColumn('sm_mercan_cair', 'akhir_tgl_tran');
+
+        $query = DB::connection('DATA_MYSQL')->table('sm_mercan_cair');
+
         if ($kdMercan !== '') {
-            $query->where(function ($q) use ($kdMercan) {
-                $q->whereRaw('TRIM(COALESCE(KDMERCAN, \'\')) = ?', [$kdMercan])
-                    ->orWhereRaw('TRIM(COALESCE(username, \'\')) = ?', [$kdMercan]);
+            $query->where(function ($q) use ($kdMercan, $hasUsername) {
+                $q->whereRaw('TRIM(COALESCE(KDMERCAN, \'\')) = ?', [$kdMercan]);
+                if ($hasUsername) {
+                    $q->orWhereRaw('TRIM(COALESCE(username, \'\')) = ?', [$kdMercan]);
+                }
             });
         }
 
         $from = $this->parseDate($dari);
         $to = $this->parseDate($sampai);
-        // Prefer filter TglTerima (dari_tgl_tran / akhir_tgl_tran sering NULL)
         if ($from) {
             $query->where('TglTerima', '>=', $from->copy()->startOfDay());
         }
@@ -340,20 +428,29 @@ class RekapPencairanKantinController extends Controller
             $query->where('TglTerima', '<=', $to->copy()->endOfDay());
         }
 
-        $rows = $query
-            ->select([
-                'TglTerima as tgl_terima',
-                'NamaPenerima as nama_penerima',
-                'Nominal as nominal',
-                'NoTerima as no_terima',
-                'dari_tgl_tran',
-                'akhir_tgl_tran',
-                'username',
-                'KDMERCAN',
-            ])
-            ->limit(self::MAX_ROWS)
-            ->get();
+        $select = [
+            'TglTerima as tgl_terima',
+            'NamaPenerima as nama_penerima',
+            'Nominal as nominal',
+            'NoTerima as no_terima',
+            'KDMERCAN',
+        ];
+        if ($hasDariTgl) {
+            $select[] = 'dari_tgl_tran';
+        }
+        if ($hasAkhirTgl) {
+            $select[] = 'akhir_tgl_tran';
+        }
+        if ($hasUsername) {
+            $select[] = 'username';
+        }
 
+        $query->select($select)->orderByDesc('TglTerima');
+        if ($hasUrut) {
+            $query->orderByDesc('urut');
+        }
+
+        $rows = $query->limit(self::MAX_ROWS)->get();
         $total = (float) $rows->sum(static fn ($r) => (float) ($r->nominal ?? 0));
 
         return [$rows, $total];
@@ -362,7 +459,7 @@ class RekapPencairanKantinController extends Controller
     private function parseDate(string $value): ?Carbon
     {
         $value = trim($value);
-        if ($value === '') {
+        if ($value === '' || $value === '0000-00-00' || str_starts_with($value, '0000-00-00')) {
             return null;
         }
 

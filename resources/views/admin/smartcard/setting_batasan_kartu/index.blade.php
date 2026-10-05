@@ -52,9 +52,15 @@
                             <option value="0" @selected((string) old('aktif', $aktif ?? '') === '0')>Tidak Aktif</option>
                         </select>
                     </div>
-                    <div class="col-12 d-flex gap-2">
+                    <div class="col-12 d-flex gap-2 flex-wrap">
                         <button type="submit" class="btn btn-outline-primary">Lihat</button>
-                        <button type="submit" class="btn btn-primary" form="formSave">Simpan</button>
+                        <button type="submit" class="btn btn-primary" form="formSave">
+                            {{ !empty($isEdit) ? 'Update' : 'Simpan' }}
+                        </button>
+                        <a href="{{ route('admin.smartcard.setting-batasan-saku.export', request()->query()) }}"
+                           class="btn btn-success">
+                            <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                        </a>
                         <a href="{{ route('admin.smartcard.setting-batasan-saku.index') }}" class="btn btn-outline-secondary">Reset</a>
                     </div>
                 </div>
@@ -62,22 +68,37 @@
 
             <form id="formSave" method="POST" action="{{ route('admin.smartcard.setting-batasan-saku.store') }}">
                 @csrf
+                <input type="hidden" name="is_edit" id="isEditSave" value="{{ !empty($isEdit) ? '1' : '0' }}">
+                <input type="hidden" name="urut" id="urutSave" value="{{ (int) ($editUrut ?? 0) }}">
+                <input type="hidden" name="edit_periode" id="editPeriodeSave" value="{{ $editPeriode ?? '' }}">
                 <input type="hidden" name="periode" id="periodeSave">
                 <input type="hidden" name="batas_belanja_hari" id="batasBelanjaSave">
                 <input type="hidden" name="batas_cash" id="batasCashSave">
                 <input type="hidden" name="aktif" id="aktifSave" value="0">
             </form>
 
+            @if (!empty($isEdit))
+                <div class="alert alert-info mt-3 mb-0 py-2">
+                    Mode edit aktif{{ ($editPeriode ?? '') !== '' ? ' (periode ' . $editPeriode . ')' : '' }}.
+                    <a href="{{ route('admin.smartcard.setting-batasan-saku.index') }}" class="alert-link">Batal edit</a>
+                </div>
+            @endif
             <p class="text-muted small mt-3 mb-0">Secara default batasan akan diberlakukan secara harian.</p>
         </div>
     </div>
 
     <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
             <h5 class="mb-0">Daftar Batasan</h5>
-            @if (($isSearch ?? false) && ($periode ?? '') !== '')
-                <small class="text-muted">periode {{ $periode }}</small>
-            @endif
+            <div class="d-flex align-items-center gap-2">
+                @if (($isSearch ?? false) && ($periode ?? '') !== '')
+                    <small class="text-muted">periode {{ $periode }}</small>
+                @endif
+                <a href="{{ route('admin.smartcard.setting-batasan-saku.export', request()->query()) }}"
+                   class="btn btn-sm btn-success">
+                    <i class="ri ri-file-excel-2-line me-1"></i>Export Excel
+                </a>
+            </div>
         </div>
         <div class="table-responsive" style="max-height:480px;">
             <table class="table table-sm table-bordered table-hover mb-0">
@@ -88,21 +109,28 @@
                         <th>Batas Belanja Hari</th>
                         <th>Batas Cash</th>
                         <th style="width:120px;">Aktif</th>
+                        <th style="width:100px;">Aksi</th>
                     </tr>
                 </thead>
                 <tbody>
                     @forelse (($batasanRows ?? null) as $index => $row)
-                        <tr>
+                        @php
+                            $p = trim((string) ($row->periode ?? ''));
+                            $periodeLabel = (strlen($p) === 6 && ctype_digit($p))
+                                ? substr($p, 0, 4) . '-' . substr($p, 4, 2)
+                                : ($p !== '' ? $p : '—');
+                            $rowUrut = (int) ($row->urut ?? 0);
+                            $isRowEditing = (!empty($isEdit) && (
+                                ($rowUrut > 0 && (int) ($editUrut ?? 0) === $rowUrut)
+                                || (($editPeriode ?? '') !== '' && $p === ($editPeriode ?? ''))
+                            ));
+                            $editParams = $rowUrut > 0
+                                ? ['edit_urut' => $rowUrut]
+                                : ['edit_periode' => $p];
+                        @endphp
+                        <tr class="{{ $isRowEditing ? 'table-warning' : '' }}">
                             <td>{{ ($batasanRows->firstItem() ?? 0) + $index }}</td>
-                            <td>
-                                @php
-                                    $p = trim((string) ($row->periode ?? ''));
-                                    $periodeLabel = (strlen($p) === 6 && ctype_digit($p))
-                                        ? substr($p, 0, 4) . '-' . substr($p, 4, 2)
-                                        : ($p !== '' ? $p : '—');
-                                @endphp
-                                {{ $periodeLabel }}
-                            </td>
+                            <td>{{ $periodeLabel }}</td>
                             <td>{{ number_format((int) ($row->batas_belanja_hari ?? 0), 0, ',', '.') }}</td>
                             <td>{{ number_format((int) ($row->batas_cash ?? 0), 0, ',', '.') }}</td>
                             <td>
@@ -112,10 +140,14 @@
                                     <span class="badge bg-secondary">Tidak Aktif</span>
                                 @endif
                             </td>
+                            <td>
+                                <a href="{{ route('admin.smartcard.setting-batasan-saku.index', $editParams) }}"
+                                   class="btn btn-sm btn-warning">Edit</a>
+                            </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="5" class="text-center text-muted py-4">Data batasan tidak ditemukan.</td>
+                            <td colspan="6" class="text-center text-muted py-4">Data batasan tidak ditemukan.</td>
                         </tr>
                     @endforelse
                 </tbody>
@@ -140,6 +172,7 @@
             const batasBelanjaInput = document.getElementById('batasBelanjaInput');
             const batasCashInput = document.getElementById('batasCashInput');
             const aktifInput = document.getElementById('aktifInput');
+            const urutSave = document.getElementById('urutSave');
             const periodeSave = document.getElementById('periodeSave');
             const batasBelanjaSave = document.getElementById('batasBelanjaSave');
             const batasCashSave = document.getElementById('batasCashSave');

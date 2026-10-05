@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Admin\Smartcard;
 
 use App\Http\Controllers\Controller;
+use App\Support\SmartcardSaldo;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
 
 class TapAmbilRutinController extends Controller
@@ -112,11 +114,11 @@ class TapAmbilRutinController extends Controller
 
         $trxDate = now();
         $transNo = $this->generateTransNo($trxDate);
-        $user = trim((string) session('auth_username', session('auth_name', '')));
-        $helpdesk = $user !== '' ? 'User:' . $user : '';
+        $loginUser = $this->currentLoginUsers();
+        $helpdesk = 'User: ' . $loginUser;
 
         try {
-            DB::connection('DATA_MYSQL')->transaction(function () use ($custid, $trxDate, $ambil, $transNo, $helpdesk) {
+            DB::connection('DATA_MYSQL')->transaction(function () use ($custid, $trxDate, $ambil, $transNo, $helpdesk, $loginUser) {
                 DB::connection('DATA_MYSQL')->table(self::TRAN_TABLE)->insert([
                     'CUSTID' => $custid,
                     'METODE' => 'Cash',
@@ -126,10 +128,26 @@ class TapAmbilRutinController extends Controller
                     'TRANSNO' => $transNo,
                     'NOREFF' => $transNo,
                     'HELPDESK' => $helpdesk,
-                    'FIDBANK' => 'cash',
-                    'KDCHANNEL' => 0,
-                    'REFFBANK' => '',
+                    'FIDBANK' => 'CASH',
+                    'KDCHANNEL' => 11,
+                    'REFFBANK' => '24',
                 ]);
+
+                $cashRow = [
+                    'CUSTID' => $custid,
+                    'BILLAM' => $ambil,
+                    'TanggalKeluar' => $trxDate->format('Y-m-d H:i:s'),
+                    'Teller' => $loginUser,
+                    'TRANSNO' => $transNo,
+                    'FIDBANK' => 'CASH',
+                ];
+                try {
+                    if (Schema::connection('DATA_MYSQL')->hasColumn('scctcashout', 'users')) {
+                        $cashRow['users'] = $loginUser;
+                    }
+                } catch (\Throwable) {
+                }
+                DB::connection('DATA_MYSQL')->table('scctcashout')->insert($cashRow);
             });
         } catch (\Throwable $e) {
             return $this->fail('Gagal menyimpan transaksi: ' . $e->getMessage(), 500);
@@ -173,13 +191,24 @@ class TapAmbilRutinController extends Controller
 
     private function fetchSaldo(int $custid): int
     {
-        $row = DB::connection('DATA_MYSQL')
-            ->table(self::TRAN_TABLE)
-            ->where('CUSTID', $custid)
-            ->selectRaw('CAST(COALESCE(SUM(KREDIT), 0) AS SIGNED) - CAST(COALESCE(SUM(DEBET), 0) AS SIGNED) AS saldo')
-            ->first();
+        return SmartcardSaldo::for($custid);
+    }
 
-        return (int) ($row->saldo ?? 0);
+    private function currentLoginUsers(): string
+    {
+        $user = Auth::user();
+        if (!$user) {
+            return 'ADMIN';
+        }
+
+        $login = trim((string) ($user->users ?? ''));
+        if ($login !== '') {
+            return $login;
+        }
+
+        $sessionUser = trim((string) session('auth_username', session('auth_name', '')));
+
+        return $sessionUser !== '' ? $sessionUser : 'ADMIN';
     }
 
     private function fetchBatasCash(): int

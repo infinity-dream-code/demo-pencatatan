@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin\Smartcard;
 
 use App\Http\Controllers\Controller;
+use App\Support\SmartcardExcelExport;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -14,12 +15,14 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class RekapTopupController extends Controller
 {
     private const PER_PAGE = 10;
 
-    private const CASH_FEE = 2000;
+    /** Muallimaat: tanpa admin fee (beda Multazam 2000). */
+    private const CASH_FEE = 0;
 
     private const METODE_TOPUP = 'TOP UP CASH';
 
@@ -29,6 +32,8 @@ class RekapTopupController extends Controller
 
     private bool $hasHelpdesk = false;
 
+    private ?string $smTopupUserCol = null;
+
     public function index(Request $request): View
     {
         $isSearch = $request->boolean('search');
@@ -36,6 +41,7 @@ class RekapTopupController extends Controller
 
         $this->tranTable = 'sccttran';
         $this->hasHelpdesk = $this->detectHelpdeskColumn($this->tranTable);
+        $this->smTopupUserCol = $this->detectSmTopupUserColumn();
 
         $thnAka = $this->fetchThnAka();
         $kelasOptions = $this->fetchKelasOptions();
@@ -50,7 +56,7 @@ class RekapTopupController extends Controller
         if ($isSearch) {
             try {
                 $rows = $this->fetchRows($filters, $request);
-                $totals = $this->sumPageTotals($rows);
+                $totals = $this->sumTotalsSql($filters);
             } catch (\Throwable $e) {
                 Log::error('Smartcard RekapTopup fetchRows failed', [
                     'message' => $e->getMessage(),
@@ -75,11 +81,62 @@ class RekapTopupController extends Controller
         ]);
     }
 
+    public function export(Request $request): StreamedResponse|RedirectResponse
+    {
+        $filters = $this->filtersFromRequest($request);
+        $this->tranTable = 'sccttran';
+        $this->hasHelpdesk = $this->detectHelpdeskColumn($this->tranTable);
+        $this->smTopupUserCol = $this->detectSmTopupUserColumn();
+
+        try {
+            $rows = $this->fetchAllRowsForPrint($filters);
+            $totals = $this->sumTotalsSql($filters);
+        } catch (\Throwable $e) {
+            return redirect()
+                ->route('admin.smartcard.rekap-topup.index', array_merge($filters, ['search' => 1]))
+                ->with('error', 'Gagal export: ' . $e->getMessage());
+        }
+
+        $exportRows = [];
+        $no = 1;
+        foreach ($rows as $row) {
+            $tgl = '';
+            if (!empty($row->tgl_transaksi)) {
+                try {
+                    $tgl = Carbon::parse($row->tgl_transaksi)->format('Y-m-d H:i:s');
+                } catch (\Throwable) {
+                    $tgl = (string) $row->tgl_transaksi;
+                }
+            }
+
+            $exportRows[] = [
+                $no++,
+                $row->kelas ?? '',
+                $row->gender ?? '',
+                $row->lokasi ?? '',
+                $row->nis ?? '',
+                $row->nama ?? '',
+                (int) ($row->topup ?? 0),
+                $tgl,
+                $row->no_transaksi ?? '',
+                $row->user ?? '',
+            ];
+        }
+        $exportRows[] = ['', '', '', '', '', 'TOTAL', (int) ($totals['topup'] ?? 0), '', '', ''];
+
+        return SmartcardExcelExport::download(
+            'rekap-topup-' . date('Ymd-His'),
+            ['No', 'Kelas', 'Gender', 'Lokasi', 'NIS', 'Nama', 'TOPUP', 'Tgl Transaksi', 'No Transaksi', 'User'],
+            $exportRows
+        );
+    }
+
     public function printRekap(Request $request): Response|RedirectResponse
     {
         $filters = $this->filtersFromRequest($request);
         $this->tranTable = 'sccttran';
         $this->hasHelpdesk = $this->detectHelpdeskColumn($this->tranTable);
+        $this->smTopupUserCol = $this->detectSmTopupUserColumn();
 
         try {
             $totalCount = (int) $this->baseQuery($filters)->count('t.CUSTID');
@@ -139,6 +196,25 @@ class RekapTopupController extends Controller
         }
     }
 
+    private function detectSmTopupUserColumn(): ?string
+    {
+        try {
+            if (!Schema::connection('DATA_MYSQL')->hasTable('sm_topup')) {
+                return null;
+            }
+        } catch (\Throwable) {
+            return null;
+        }
+
+        foreach (['users', 'user', 'User'] as $col) {
+            if ($this->detectColumn('sm_topup', $col)) {
+                return $col;
+            }
+        }
+
+        return null;
+    }
+
     private function baseQuery(array $filters)
     {
         $t = $this->tranTable;
@@ -155,9 +231,14 @@ class RekapTopupController extends Controller
                 $join->on(DB::raw('sk.code01'), '=', DB::raw('TRIM(scctcust.CODE01)'));
             })
             ->where('t.KREDIT', '>', 0)
+            ->whereRaw("UPPER(TRIM(COALESCE(t.METODE, ''))) <> 'ADMINFEE'")
             ->where(function ($q) {
                 $q->whereRaw("UPPER(TRIM(COALESCE(t.FIDBANK, ''))) = 'TOPUP'")
                     ->orWhereRaw("UPPER(TRIM(COALESCE(t.METODE, ''))) LIKE 'TOP UP%'")
+                    ->orWhere(function ($q2) {
+                        $q2->whereRaw("UPPER(TRIM(COALESCE(t.FIDBANK, ''))) = 'CASH'")
+                            ->whereRaw("UPPER(TRIM(COALESCE(t.METODE, ''))) LIKE 'TOP UP%'");
+                    })
                     ->orWhere(function ($q2) {
                         $q2->whereRaw('TRIM(COALESCE(t.FIDBANK, \'\')) = ?', [self::FIDBANK])
                             ->where(function ($q3) {
@@ -166,6 +247,14 @@ class RekapTopupController extends Controller
                             });
                     });
             });
+
+        if ($this->smTopupUserCol !== null) {
+            $query->leftJoin('sm_topup as tp', function ($join) {
+                $join->whereRaw(
+                    'TRIM(tp.TOPUPNO) = TRIM(COALESCE(NULLIF(TRIM(t.TRANSNO), \'\'), t.NOREFF))'
+                );
+            });
+        }
 
         $this->applySchoolScope($query);
         $this->applyFilters($query, $filters);
@@ -179,12 +268,16 @@ class RekapTopupController extends Controller
             ? 't.MERCHANT'
             : ($this->detectColumn($this->tranTable, 'MERCH') ? 't.MERCH' : null);
 
+        // Prioritas: sm_topup.users (login cyber_key) → MERCHANT → HELPDESK
         $userParts = [];
-        if ($this->hasHelpdesk) {
-            $userParts[] = "NULLIF(TRIM(t.HELPDESK), '')";
+        if ($this->smTopupUserCol !== null) {
+            $userParts[] = "NULLIF(TRIM(tp.`{$this->smTopupUserCol}`), '')";
         }
         if ($merchantCol !== null) {
             $userParts[] = "NULLIF(TRIM({$merchantCol}), '')";
+        }
+        if ($this->hasHelpdesk) {
+            $userParts[] = "NULLIF(TRIM(t.HELPDESK), '')";
         }
         $userExpr = $userParts === []
             ? "'-'"
@@ -223,17 +316,21 @@ class RekapTopupController extends Controller
     private function mapRow(object $row): object
     {
         $topupGross = (int) ($row->topup ?? 0);
-        $fee = (int) ($row->fee_debet ?? 0);
-        if ($fee <= 0) {
-            $fee = $this->parseFee((string) ($row->helpdesk ?? ''), (string) ($row->metode ?? ''));
-        }
+        // Muallimaat: tanpa admin fee — tampilkan nominal utuh
         $row->topup = $topupGross;
-        $row->fee = $fee;
-        $row->total = max(0, $topupGross - $fee);
+        $row->fee = 0;
+        $row->total = $topupGross;
 
-        $rawUser = trim((string) ($row->user_raw ?? $row->helpdesk ?? ''));
-        $parsed = $this->parseUser($rawUser);
-        $row->user = $parsed !== '-' ? $parsed : ($rawUser !== '' && $rawUser !== '-' ? $rawUser : '-');
+        $rawUser = trim((string) ($row->user_raw ?? ''));
+        if ($rawUser === '' || $rawUser === '-') {
+            $parsed = $this->parseUser((string) ($row->helpdesk ?? ''));
+            $row->user = $parsed;
+        } elseif (preg_match('/User:\s*([^\s|]+)/i', $rawUser, $m)) {
+            $row->user = trim($m[1]) !== '' ? trim($m[1]) : $rawUser;
+        } else {
+            // sm_topup.users sudah login username (bukan ket/nama)
+            $row->user = $rawUser;
+        }
 
         return $row;
     }
@@ -257,45 +354,16 @@ class RekapTopupController extends Controller
 
     private function sumTotalsSql(array $filters): array
     {
-        $cashFee = self::CASH_FEE;
-
-        if ($this->hasHelpdesk) {
-            $feeExpr = "CASE
-                WHEN t.HELPDESK LIKE ? THEN
-                    CAST(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(t.HELPDESK, 'Biaya:', -1), '|', 1)) AS SIGNED)
-                WHEN UPPER(TRIM(COALESCE(t.METODE, ''))) LIKE 'TOP UP%'
-                  OR UPPER(TRIM(COALESCE(t.METODE, ''))) = 'CASH'
-                  OR UPPER(TRIM(COALESCE(t.FIDBANK, ''))) = 'TOPUP'
-                THEN ?
-                ELSE 0
-            END";
-            $bindings = ['%Biaya:%', $cashFee];
-        } else {
-            $feeExpr = "CASE
-                WHEN UPPER(TRIM(COALESCE(t.METODE, ''))) LIKE 'TOP UP%'
-                  OR UPPER(TRIM(COALESCE(t.METODE, ''))) = 'CASH'
-                  OR UPPER(TRIM(COALESCE(t.FIDBANK, ''))) = 'TOPUP'
-                THEN ?
-                ELSE 0
-            END";
-            $bindings = [$cashFee];
-        }
-
         $row = $this->baseQuery($filters)
-            ->selectRaw(
-                "CAST(COALESCE(SUM(t.KREDIT), 0) AS SIGNED) as topup_sum,
-                CAST(COALESCE(SUM({$feeExpr}), 0) AS SIGNED) as fee_sum",
-                $bindings
-            )
+            ->selectRaw('CAST(COALESCE(SUM(t.KREDIT), 0) AS SIGNED) as topup_sum')
             ->first();
 
         $topup = (int) ($row->topup_sum ?? 0);
-        $fee = (int) ($row->fee_sum ?? 0);
 
         return [
             'topup' => $topup,
-            'fee' => $fee,
-            'grand' => max(0, $topup - $fee),
+            'fee' => 0,
+            'grand' => $topup,
         ];
     }
 

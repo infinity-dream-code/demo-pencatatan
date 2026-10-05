@@ -3,16 +3,18 @@
 namespace App\Http\Controllers\Admin\Smartcard;
 
 use App\Http\Controllers\Controller;
+use App\Support\SmartcardExcelExport;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TransaksiBelanjaController extends Controller
 {
-    private const PER_PAGE = 25;
+    private const PER_PAGE_OPTIONS = [10, 25, 50, 100, 200];
 
     private string $title = 'smartCARD';
     private string $mainTitle = 'Transaksi Belanja';
@@ -20,19 +22,12 @@ class TransaksiBelanjaController extends Controller
     public function index(Request $request): View
     {
         $isSearch = $request->boolean('search');
-        $filters = [
-            'thn_akademik' => trim((string) $request->query('thn_akademik', '')),
-            'thn_angkatan' => trim((string) $request->query('thn_angkatan', '')),
-            'nis' => trim((string) $request->query('nis', '')),
-            'nama' => trim((string) $request->query('nama', '')),
-            'dari_tanggal' => trim((string) $request->query('dari_tanggal', '')),
-            'sampai_tanggal' => trim((string) $request->query('sampai_tanggal', '')),
-            'kelas_id' => trim((string) $request->query('kelas_id', '')),
-        ];
+        $filters = $this->filtersFromRequest($request);
+        $perPage = $this->resolvePerPage($request);
 
         $rows = $isSearch
-            ? $this->fetchRows($filters)
-            : new LengthAwarePaginator([], 0, self::PER_PAGE, 1, [
+            ? $this->fetchRows($filters, $perPage)
+            : new LengthAwarePaginator([], 0, $perPage, 1, [
                 'path' => $request->url(),
                 'query' => $request->query(),
             ]);
@@ -47,7 +42,89 @@ class TransaksiBelanjaController extends Controller
             'totalDebet' => $isSearch ? $this->sumDebet($filters) : 0,
             'thnAka' => $this->fetchThnAka(),
             'kelasOptions' => $this->fetchKelasOptions(),
+            'kantinOptions' => $this->fetchKantinOptions(),
+            'perPage' => $perPage,
+            'perPageOptions' => self::PER_PAGE_OPTIONS,
         ]);
+    }
+
+    public function export(Request $request): StreamedResponse
+    {
+        $filters = $this->filtersFromRequest($request);
+
+        $rows = $this->baseQuery($filters)
+            ->select([
+                'scctcust.NMCUST as nama',
+                'scctcust.NOCUST as nis',
+                'scctcashout.TanggalKeluar as tgl_transaksi',
+                'scctcashout.BILLAM as debet',
+                DB::raw('COALESCE(NULLIF(TRIM(sm_kantin.NamaKantin), \'\'), TRIM(scctcashout.Teller)) as kantin'),
+                'scctcust.DESC02 as kelas',
+                'scctcust.DESC03 as kelompok',
+            ])
+            ->orderByDesc('scctcashout.TanggalKeluar')
+            ->orderByDesc('scctcashout.urut')
+            ->get();
+
+        $exportRows = [];
+        $no = 1;
+        $total = 0;
+        foreach ($rows as $row) {
+            $debet = (float) ($row->debet ?? 0);
+            $total += $debet;
+            $tgl = '';
+            if (!empty($row->tgl_transaksi)) {
+                try {
+                    $tgl = Carbon::parse($row->tgl_transaksi)->format('d-m-Y H:i');
+                } catch (\Throwable) {
+                    $tgl = (string) $row->tgl_transaksi;
+                }
+            }
+
+            $exportRows[] = [
+                $no++,
+                $row->nis ?? '',
+                $row->nama ?? '',
+                $tgl,
+                $debet,
+                $row->kantin ?? '',
+                $row->kelas ?? '',
+                $row->kelompok ?? '',
+            ];
+        }
+
+        $exportRows[] = ['', '', '', 'TOTAL', $total, '', '', ''];
+
+        return SmartcardExcelExport::download(
+            'transaksi-belanja-' . date('Ymd-His'),
+            ['No', 'NIS', 'Nama', 'Tgl Transaksi', 'Debet', 'Kantin', 'Kelas', 'Kelompok'],
+            $exportRows
+        );
+    }
+
+    private function filtersFromRequest(Request $request): array
+    {
+        return [
+            'thn_akademik' => trim((string) $request->query('thn_akademik', '')),
+            'thn_angkatan' => trim((string) $request->query('thn_angkatan', '')),
+            'nis' => trim((string) $request->query('nis', '')),
+            'nama' => trim((string) $request->query('nama', '')),
+            'nama_kantin' => trim((string) $request->query('nama_kantin', '')),
+            'dari_tanggal' => trim((string) $request->query('dari_tanggal', '')),
+            'sampai_tanggal' => trim((string) $request->query('sampai_tanggal', '')),
+            'kelas_id' => trim((string) $request->query('kelas_id', '')),
+            'per_page' => (string) $this->resolvePerPage($request),
+        ];
+    }
+
+    private function resolvePerPage(Request $request): int
+    {
+        $perPage = (int) $request->query('per_page', 25);
+        if (!in_array($perPage, self::PER_PAGE_OPTIONS, true)) {
+            return 25;
+        }
+
+        return $perPage;
     }
 
     private function db()
@@ -79,6 +156,26 @@ class TransaksiBelanjaController extends Controller
                 ->orderBy('jenjang')
                 ->orderBy('kelas')
                 ->get(['id', 'unit', 'jenjang', 'kelas'])
+                ->all();
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    private function fetchKantinOptions(): array
+    {
+        try {
+            return $this->db()
+                ->table('sm_kantin')
+                ->whereNotNull('NamaKantin')
+                ->whereRaw("TRIM(NamaKantin) <> ''")
+                ->orderBy('NamaKantin')
+                ->distinct()
+                ->get(['NamaKantin'])
+                ->map(static fn ($r) => trim((string) ($r->NamaKantin ?? '')))
+                ->filter(static fn ($v) => $v !== '')
+                ->unique()
+                ->values()
                 ->all();
         } catch (\Throwable) {
             return [];
@@ -122,6 +219,14 @@ class TransaksiBelanjaController extends Controller
 
         if ($filters['nama'] !== '') {
             $query->where('scctcust.NMCUST', 'like', '%' . $filters['nama'] . '%');
+        }
+
+        if (($filters['nama_kantin'] ?? '') !== '') {
+            $kantin = $filters['nama_kantin'];
+            $query->where(function ($q) use ($kantin) {
+                $q->where('sm_kantin.NamaKantin', 'like', '%' . $kantin . '%')
+                    ->orWhere('scctcashout.Teller', 'like', '%' . $kantin . '%');
+            });
         }
 
         if ($filters['thn_akademik'] !== '') {
@@ -215,7 +320,7 @@ class TransaksiBelanjaController extends Controller
         }
     }
 
-    private function fetchRows(array $filters): LengthAwarePaginator
+    private function fetchRows(array $filters, int $perPage): LengthAwarePaginator
     {
         return $this->baseQuery($filters)
             ->select([
@@ -229,7 +334,7 @@ class TransaksiBelanjaController extends Controller
             ])
             ->orderByDesc('scctcashout.TanggalKeluar')
             ->orderByDesc('scctcashout.urut')
-            ->paginate(self::PER_PAGE)
+            ->paginate($perPage)
             ->withQueryString();
     }
 
