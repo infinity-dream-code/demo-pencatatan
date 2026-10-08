@@ -17,7 +17,7 @@
 </head>
 <body>
     <h2>CETAK TRANSAKSI SISWA</h2>
-    <div class="muted">PENGELUARAN UANG SAKU — {{ $printedAt->format('d/m/Y H:i') }} — {{ $teller }}</div>
+    <div class="muted">PENGELUARAN UANG SAKU — {{ $printedAt->format('Y-m-d H:i:s') }} — {{ $teller }}</div>
 
     <table class="meta">
         <tr><td>NIS</td><td>: <strong>{{ $siswa->nis }}</strong></td></tr>

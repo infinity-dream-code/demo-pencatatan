@@ -53,7 +53,7 @@
     </style>
 </head>
 <body>
-    <div class="header-right">{{ $sekolahNama ?? 'Al-Multazam' }}</div>
+    <div class="header-right">{{ $sekolahNama ?? "Mu'allimaat Muhammadiyah Yogyakarta" }}</div>
     <div class="title">TOPUP UANG SAKU</div>
   @php
         $dari = trim((string) ($filters['dari_tanggal'] ?? ''));
@@ -109,7 +109,7 @@
     </div>
 
     <div style="margin-top:24px;text-align:right;font-size:10px;">
-        Al-Multazam, {{ now()->format('Y-m-d') }}
+        {{ $sekolahNama ?? "Mu'allimaat Muhammadiyah Yogyakarta" }}, {{ now()->format('Y-m-d') }}
     </div>
 </body>
 </html>

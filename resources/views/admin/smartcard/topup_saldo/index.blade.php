@@ -157,7 +157,11 @@
                         @forelse ($topupRows as $row)
                             <tr>
                                 <td>{{ $row->no_transaksi }}</td>
-                                <td>{{ $row->tgl_transaksi }}</td>
+                                <td>
+                                    @if (!empty($row->tgl_transaksi))
+                                        {{ \Illuminate\Support\Carbon::parse($row->tgl_transaksi)->format('Y-m-d H:i:s') }}
+                                    @else — @endif
+                                </td>
                                 <td class="text-end">{{ number_format((int)$row->topup, 0, ',', '.') }}</td>
                                 <td>{{ $row->user ?? '-' }}</td>
                             </tr>
@@ -184,7 +188,11 @@
                         <tbody id="tranBody">
                         @forelse ($tranRows as $row)
                             <tr>
-                                <td>{{ $row->tanggal }}</td>
+                                <td>
+                                    @if (!empty($row->tanggal))
+                                        {{ \Illuminate\Support\Carbon::parse($row->tanggal)->format('Y-m-d H:i:s') }}
+                                    @else — @endif
+                                </td>
                                 <td>{{ $row->metode }}</td>
                                 <td class="text-end">{{ number_format((int)$row->kredit, 0, ',', '.') }}</td>
                                 <td class="text-end">{{ number_format((int)$row->debet, 0, ',', '.') }}</td>

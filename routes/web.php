@@ -511,6 +511,7 @@ Route::prefix("admin")
                     ->group(function () {
                         Route::get("/", "index")->name("index");
                         Route::post("/", "store")->name("store");
+                        Route::post("update-pin", "updatePin")->name("update-pin");
                         Route::get("siswa-search", "siswaSearch")->name("siswa-search");
                         Route::get("export", "export")->name("export");
                     });

@@ -84,6 +84,11 @@
                                        value="{{ old('nama_penerima', $namaPenerima ?? '') }}" placeholder="Nama penerima">
                             </div>
                             <div class="col-md-6">
+                                <label class="form-label" for="tanggalTerima">Tanggal Terima <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control" id="tanggalTerima" name="tanggal_terima"
+                                       value="{{ old('tanggal_terima', $tanggalTerima ?? now()->format('Y-m-d')) }}" required>
+                            </div>
+                            <div class="col-md-6">
                                 <label class="form-label" for="nominal">Nominal</label>
                                 <input type="number" class="form-control" id="nominal" name="nominal"
                                        value="{{ old('nominal', $nominal !== '' ? $nominal : '') }}" min="1" step="1" placeholder="0">
@@ -93,6 +98,7 @@
                                 <input type="text" class="form-control" value="{{ $previewNoTerima ?? '' }}" readonly>
                             </div>
                             <div class="col-12">
+                                <small class="text-muted d-block mb-2">Dari/Sampai tanggal opsional (filter transaksi). Simpan cukup Tanggal Terima + Merchant.</small>
                                 <button type="submit" class="btn btn-primary">Simpan</button>
                             </div>
                         </div>
@@ -127,7 +133,7 @@
                                 <tr>
                                     <td>
                                         @if (!empty($row->tgl_transaksi) && !str_starts_with((string) $row->tgl_transaksi, '0000-00-00'))
-                                            {{ \Illuminate\Support\Carbon::parse($row->tgl_transaksi)->format('d-m-Y H:i') }}
+                                            {{ \Illuminate\Support\Carbon::parse($row->tgl_transaksi)->format('d-m-Y H:i:s') }}
                                         @else — @endif
                                     </td>
                                     <td class="text-end">{{ number_format((float) ($row->saldo ?? 0), 0, ',', '.') }}</td>
@@ -249,18 +255,14 @@
                 if (!kdMercan?.value) {
                     e.preventDefault();
                     alert('Pilih merchant terlebih dahulu.');
+                    kdMercan?.focus();
                     return;
                 }
-                if (!dariTanggal?.value) {
+                const tglTerima = document.getElementById('tanggalTerima');
+                if (!tglTerima?.value) {
                     e.preventDefault();
-                    alert('Dari tanggal wajib diisi.');
-                    dariTanggal?.focus();
-                    return;
-                }
-                if (!sampaiTanggal?.value) {
-                    e.preventDefault();
-                    alert('Sampai tanggal wajib diisi.');
-                    sampaiTanggal?.focus();
+                    alert('Tanggal terima wajib diisi.');
+                    tglTerima?.focus();
                     return;
                 }
                 if (!(namaPenerima?.value || '').trim()) {

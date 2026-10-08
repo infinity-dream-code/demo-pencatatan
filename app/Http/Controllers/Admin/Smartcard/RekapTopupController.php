@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -17,20 +18,13 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
+/**
+ * Rekap TOPUP — sumber utama sm_topup.
+ * Kolom User = sm_topup.users (login cyber_key.users).
+ */
 class RekapTopupController extends Controller
 {
-    private const PER_PAGE = 10;
-
-    /** Muallimaat: tanpa admin fee (beda Multazam 2000). */
-    private const CASH_FEE = 0;
-
-    private const METODE_TOPUP = 'TOP UP CASH';
-
-    private const FIDBANK = '1140002';
-
-    private string $tranTable = 'sccttran';
-
-    private bool $hasHelpdesk = false;
+    private const PER_PAGE_OPTIONS = [10, 25, 50, 100, 200];
 
     private ?string $smTopupUserCol = null;
 
@@ -38,15 +32,13 @@ class RekapTopupController extends Controller
     {
         $isSearch = $request->boolean('search');
         $filters = $this->filtersFromRequest($request);
-
-        $this->tranTable = 'sccttran';
-        $this->hasHelpdesk = $this->detectHelpdeskColumn($this->tranTable);
+        $perPage = $this->resolvePerPage($request);
         $this->smTopupUserCol = $this->detectSmTopupUserColumn();
 
         $thnAka = $this->fetchThnAka();
         $kelasOptions = $this->fetchKelasOptions();
 
-        $rows = new LengthAwarePaginator([], 0, self::PER_PAGE, 1, [
+        $rows = new LengthAwarePaginator([], 0, $perPage, 1, [
             'path' => $request->url(),
             'query' => $request->query(),
         ]);
@@ -55,15 +47,12 @@ class RekapTopupController extends Controller
 
         if ($isSearch) {
             try {
-                $rows = $this->fetchRows($filters, $request);
+                $rows = $this->fetchRows($filters, $perPage);
                 $totals = $this->sumTotalsSql($filters);
             } catch (\Throwable $e) {
-                Log::error('Smartcard RekapTopup fetchRows failed', [
-                    'message' => $e->getMessage(),
-                    'table' => $this->tranTable,
-                ]);
+                Log::error('Smartcard RekapTopup fetchRows failed', ['message' => $e->getMessage()]);
                 report($e);
-                $errorMessage = 'Gagal memuat data [' . $this->tranTable . ']: ' . $e->getMessage();
+                $errorMessage = 'Gagal memuat data [sm_topup]: ' . $e->getMessage();
             }
         }
 
@@ -77,6 +66,8 @@ class RekapTopupController extends Controller
             'totals' => $totals,
             'thnAka' => $thnAka,
             'kelasOptions' => $kelasOptions,
+            'perPage' => $perPage,
+            'perPageOptions' => self::PER_PAGE_OPTIONS,
             'errorMessage' => $errorMessage,
         ]);
     }
@@ -84,12 +75,10 @@ class RekapTopupController extends Controller
     public function export(Request $request): StreamedResponse|RedirectResponse
     {
         $filters = $this->filtersFromRequest($request);
-        $this->tranTable = 'sccttran';
-        $this->hasHelpdesk = $this->detectHelpdeskColumn($this->tranTable);
         $this->smTopupUserCol = $this->detectSmTopupUserColumn();
 
         try {
-            $rows = $this->fetchAllRowsForPrint($filters);
+            $rows = $this->fetchAllRows($filters);
             $totals = $this->sumTotalsSql($filters);
         } catch (\Throwable $e) {
             return redirect()
@@ -100,15 +89,6 @@ class RekapTopupController extends Controller
         $exportRows = [];
         $no = 1;
         foreach ($rows as $row) {
-            $tgl = '';
-            if (!empty($row->tgl_transaksi)) {
-                try {
-                    $tgl = Carbon::parse($row->tgl_transaksi)->format('Y-m-d H:i:s');
-                } catch (\Throwable) {
-                    $tgl = (string) $row->tgl_transaksi;
-                }
-            }
-
             $exportRows[] = [
                 $no++,
                 $row->kelas ?? '',
@@ -117,7 +97,7 @@ class RekapTopupController extends Controller
                 $row->nis ?? '',
                 $row->nama ?? '',
                 (int) ($row->topup ?? 0),
-                $tgl,
+                SmartcardExcelExport::datetimeCell($row->tgl_transaksi ?? null),
                 $row->no_transaksi ?? '',
                 $row->user ?? '',
             ];
@@ -134,12 +114,10 @@ class RekapTopupController extends Controller
     public function printRekap(Request $request): Response|RedirectResponse
     {
         $filters = $this->filtersFromRequest($request);
-        $this->tranTable = 'sccttran';
-        $this->hasHelpdesk = $this->detectHelpdeskColumn($this->tranTable);
         $this->smTopupUserCol = $this->detectSmTopupUserColumn();
 
         try {
-            $totalCount = (int) $this->baseQuery($filters)->count('t.CUSTID');
+            $totalCount = (int) $this->baseQuery($filters)->count('tp.CUSTID');
             if ($totalCount <= 0) {
                 return redirect()
                     ->route('admin.smartcard.rekap-topup.index', array_merge($filters, ['search' => 1]))
@@ -152,21 +130,18 @@ class RekapTopupController extends Controller
             $pdf = Pdf::loadView('admin.smartcard.rekap_topup.rekap-pdf', [
                 'sekolahNama' => $sekolahNama,
                 'filters' => $filters,
-                'rows' => $this->fetchAllRowsForPrint($filters),
+                'rows' => $this->fetchAllRows($filters),
                 'totals' => $totals,
             ])->setPaper('a4', 'landscape');
 
             return $pdf->stream('rekap-topup-uang-saku-' . date('Ymd-His') . '.pdf');
         } catch (\Throwable $e) {
-            Log::error('Smartcard RekapTopup printRekap failed', [
-                'message' => $e->getMessage(),
-                'table' => $this->tranTable,
-            ]);
+            Log::error('Smartcard RekapTopup printRekap failed', ['message' => $e->getMessage()]);
             report($e);
 
             return redirect()
                 ->route('admin.smartcard.rekap-topup.index', array_merge($filters, ['search' => 1]))
-                ->with('error', 'Gagal mencetak [' . $this->tranTable . ']: ' . $e->getMessage());
+                ->with('error', 'Gagal mencetak: ' . $e->getMessage());
         }
     }
 
@@ -179,12 +154,18 @@ class RekapTopupController extends Controller
             'nama' => trim((string) $request->input('nama', $request->query('nama', ''))),
             'dari_tanggal' => trim((string) $request->input('dari_tanggal', $request->query('dari_tanggal', ''))),
             'sampai_tanggal' => trim((string) $request->input('sampai_tanggal', $request->query('sampai_tanggal', ''))),
+            'per_page' => (string) $this->resolvePerPage($request),
         ];
     }
 
-    private function detectHelpdeskColumn(string $table): bool
+    private function resolvePerPage(Request $request): int
     {
-        return $this->detectColumn($table, 'HELPDESK');
+        $perPage = (int) $request->input('per_page', $request->query('per_page', 25));
+        if (!in_array($perPage, self::PER_PAGE_OPTIONS, true)) {
+            return 25;
+        }
+
+        return $perPage;
     }
 
     private function detectColumn(string $table, string $column): bool
@@ -217,7 +198,9 @@ class RekapTopupController extends Controller
 
     private function baseQuery(array $filters)
     {
-        $t = $this->tranTable;
+        if (!Schema::connection('DATA_MYSQL')->hasTable('sm_topup')) {
+            throw new \RuntimeException('Tabel sm_topup tidak tersedia.');
+        }
 
         $sekolah = DB::connection('DATA_MYSQL')
             ->table('mst_sekolah')
@@ -225,36 +208,12 @@ class RekapTopupController extends Controller
             ->groupByRaw('TRIM(CODE01)');
 
         $query = DB::connection('DATA_MYSQL')
-            ->table("{$t} as t")
-            ->join('scctcust', 't.CUSTID', '=', 'scctcust.CUSTID')
+            ->table('sm_topup as tp')
+            ->join('scctcust', 'tp.CUSTID', '=', 'scctcust.CUSTID')
             ->leftJoinSub($sekolah, 'sk', function ($join) {
                 $join->on(DB::raw('sk.code01'), '=', DB::raw('TRIM(scctcust.CODE01)'));
             })
-            ->where('t.KREDIT', '>', 0)
-            ->whereRaw("UPPER(TRIM(COALESCE(t.METODE, ''))) <> 'ADMINFEE'")
-            ->where(function ($q) {
-                $q->whereRaw("UPPER(TRIM(COALESCE(t.FIDBANK, ''))) = 'TOPUP'")
-                    ->orWhereRaw("UPPER(TRIM(COALESCE(t.METODE, ''))) LIKE 'TOP UP%'")
-                    ->orWhere(function ($q2) {
-                        $q2->whereRaw("UPPER(TRIM(COALESCE(t.FIDBANK, ''))) = 'CASH'")
-                            ->whereRaw("UPPER(TRIM(COALESCE(t.METODE, ''))) LIKE 'TOP UP%'");
-                    })
-                    ->orWhere(function ($q2) {
-                        $q2->whereRaw('TRIM(COALESCE(t.FIDBANK, \'\')) = ?', [self::FIDBANK])
-                            ->where(function ($q3) {
-                                $q3->whereRaw('UPPER(TRIM(t.METODE)) = ?', [self::METODE_TOPUP])
-                                    ->orWhereRaw('UPPER(TRIM(t.METODE)) = ?', ['TOP UP CASHLESS']);
-                            });
-                    });
-            });
-
-        if ($this->smTopupUserCol !== null) {
-            $query->leftJoin('sm_topup as tp', function ($join) {
-                $join->whereRaw(
-                    'TRIM(tp.TOPUPNO) = TRIM(COALESCE(NULLIF(TRIM(t.TRANSNO), \'\'), t.NOREFF))'
-                );
-            });
-        }
+            ->where('tp.NOMINAL', '>', 0);
 
         $this->applySchoolScope($query);
         $this->applyFilters($query, $filters);
@@ -264,98 +223,61 @@ class RekapTopupController extends Controller
 
     private function selectColumns(): array
     {
-        $merchantCol = $this->detectColumn($this->tranTable, 'MERCHANT')
-            ? 't.MERCHANT'
-            : ($this->detectColumn($this->tranTable, 'MERCH') ? 't.MERCH' : null);
-
-        // Prioritas: sm_topup.users (login cyber_key) → MERCHANT → HELPDESK
-        $userParts = [];
-        if ($this->smTopupUserCol !== null) {
-            $userParts[] = "NULLIF(TRIM(tp.`{$this->smTopupUserCol}`), '')";
-        }
-        if ($merchantCol !== null) {
-            $userParts[] = "NULLIF(TRIM({$merchantCol}), '')";
-        }
-        if ($this->hasHelpdesk) {
-            $userParts[] = "NULLIF(TRIM(t.HELPDESK), '')";
-        }
-        $userExpr = $userParts === []
-            ? "'-'"
-            : 'COALESCE(' . implode(', ', $userParts) . ", '-')";
+        $userExpr = $this->smTopupUserCol !== null
+            ? "COALESCE(NULLIF(TRIM(tp.`{$this->smTopupUserCol}`), ''), '-')"
+            : "'-'";
 
         return [
-            't.urut',
+            'tp.CUSTID as custid',
             'scctcust.NOCUST as nis',
             'scctcust.NMCUST as nama',
-            't.KREDIT as topup',
-            't.TRXDATE as tgl_transaksi',
-            DB::raw("COALESCE(NULLIF(TRIM(t.TRANSNO), ''), NULLIF(TRIM(t.NOREFF), ''), '-') as no_transaksi"),
-            $this->hasHelpdesk
-                ? 't.HELPDESK as helpdesk'
-                : DB::raw("'' as helpdesk"),
-            't.METODE as metode',
-            DB::raw('0 as fee_debet'),
+            'tp.NOMINAL as topup',
+            'tp.TRXDATE as tgl_transaksi',
+            DB::raw("COALESCE(NULLIF(TRIM(tp.TOPUPNO), ''), '-') as no_transaksi"),
+            DB::raw("{$userExpr} as user_raw"),
             DB::raw("COALESCE(NULLIF(TRIM(scctcust.DESC03), ''), NULLIF(TRIM(scctcust.DESC02), ''), '-') as kelas"),
             DB::raw("COALESCE(NULLIF(TRIM(scctcust.CODE04), ''), '-') as gender"),
             DB::raw("COALESCE(NULLIF(TRIM(sk.nama_sekolah), ''), NULLIF(TRIM(scctcust.DESC01), ''), '-') as lokasi"),
-            DB::raw("{$userExpr} as user_raw"),
         ];
     }
 
-    private function fetchRows(array $filters, Request $request): LengthAwarePaginator
+    private function fetchRows(array $filters, int $perPage): LengthAwarePaginator
     {
         return $this->baseQuery($filters)
             ->select($this->selectColumns())
-            ->orderByDesc('t.TRXDATE')
-            ->orderByDesc('t.urut')
-            ->paginate(self::PER_PAGE)
+            ->orderByDesc('tp.TRXDATE')
+            ->paginate($perPage)
             ->withQueryString()
             ->through(fn ($row) => $this->mapRow($row));
     }
 
+    private function fetchAllRows(array $filters): Collection
+    {
+        return $this->baseQuery($filters)
+            ->select($this->selectColumns())
+            ->orderByDesc('tp.TRXDATE')
+            ->get()
+            ->map(fn ($row) => $this->mapRow($row));
+    }
+
     private function mapRow(object $row): object
     {
-        $topupGross = (int) ($row->topup ?? 0);
-        // Muallimaat: tanpa admin fee — tampilkan nominal utuh
-        $row->topup = $topupGross;
+        $topup = (int) ($row->topup ?? 0);
+        $row->topup = $topup;
         $row->fee = 0;
-        $row->total = $topupGross;
+        $row->total = $topup;
 
         $rawUser = trim((string) ($row->user_raw ?? ''));
-        if ($rawUser === '' || $rawUser === '-') {
-            $parsed = $this->parseUser((string) ($row->helpdesk ?? ''));
-            $row->user = $parsed;
-        } elseif (preg_match('/User:\s*([^\s|]+)/i', $rawUser, $m)) {
-            $row->user = trim($m[1]) !== '' ? trim($m[1]) : $rawUser;
-        } else {
-            // sm_topup.users sudah login username (bukan ket/nama)
-            $row->user = $rawUser;
-        }
+        $row->user = ($rawUser !== '' && $rawUser !== '-') ? $rawUser : '-';
 
         return $row;
     }
 
     /** @return array{topup: int, fee: int, grand: int} */
-    private function sumPageTotals(LengthAwarePaginator $paginator): array
-    {
-        $topup = 0;
-        $fee = 0;
-        foreach ($paginator->items() as $row) {
-            $topup += (int) ($row->topup ?? 0);
-            $fee += (int) ($row->fee ?? 0);
-        }
-
-        return [
-            'topup' => $topup,
-            'fee' => $fee,
-            'grand' => max(0, $topup - $fee),
-        ];
-    }
-
     private function sumTotalsSql(array $filters): array
     {
         $row = $this->baseQuery($filters)
-            ->selectRaw('CAST(COALESCE(SUM(t.KREDIT), 0) AS SIGNED) as topup_sum')
+            ->selectRaw('CAST(COALESCE(SUM(tp.NOMINAL), 0) AS SIGNED) as topup_sum')
             ->first();
 
         $topup = (int) ($row->topup_sum ?? 0);
@@ -365,44 +287,6 @@ class RekapTopupController extends Controller
             'fee' => 0,
             'grand' => $topup,
         ];
-    }
-
-    private function fetchAllRowsForPrint(array $filters): \Illuminate\Support\Collection
-    {
-        return $this->baseQuery($filters)
-            ->select($this->selectColumns())
-            ->orderByDesc('t.TRXDATE')
-            ->orderByDesc('t.urut')
-            ->get()
-            ->map(fn ($row) => $this->mapRow($row));
-    }
-
-    private function parseFee(string $helpdesk, string $metode): int
-    {
-        if (preg_match('/Biaya:\s*(\d+)/i', $helpdesk, $m)) {
-            return (int) $m[1];
-        }
-
-        $m = strtoupper(trim($metode));
-
-        return $m === 'CASH'
-            || $m === self::METODE_TOPUP
-            || $m === 'TOP UP CASHLESS'
-            || str_starts_with($m, 'TOP UP')
-            ? self::CASH_FEE
-            : 0;
-    }
-
-    private function parseUser(string $helpdesk): string
-    {
-        if (preg_match('/User:\s*([^\s|]+)/i', $helpdesk, $m)) {
-            $user = trim($m[1]);
-            if ($user !== '') {
-                return $user;
-            }
-        }
-
-        return '-';
     }
 
     private function applySchoolScope($query): void
@@ -435,14 +319,14 @@ class RekapTopupController extends Controller
         if ($filters['dari_tanggal'] !== '') {
             $from = $this->parseDate($filters['dari_tanggal']);
             if ($from) {
-                $query->where('t.TRXDATE', '>=', $from->startOfDay());
+                $query->where('tp.TRXDATE', '>=', $from->startOfDay());
             }
         }
 
         if ($filters['sampai_tanggal'] !== '') {
             $to = $this->parseDate($filters['sampai_tanggal']);
             if ($to) {
-                $query->where('t.TRXDATE', '<=', $to->endOfDay());
+                $query->where('tp.TRXDATE', '<=', $to->endOfDay());
             }
         }
 
@@ -568,6 +452,11 @@ class RekapTopupController extends Controller
             }
         }
 
-        return 'Al-Multazam';
+        $appName = trim((string) config('app.name', ''));
+        if ($appName !== '' && !preg_match('/laravel/i', $appName)) {
+            return $appName;
+        }
+
+        return "Mu'allimaat Muhammadiyah Yogyakarta";
     }
 }

@@ -148,7 +148,7 @@
                         <td>{{ $row->nama ?? '—' }}</td>
                         <td>
                             @if (!empty($row->tgl_transaksi))
-                                {{ \Illuminate\Support\Carbon::parse($row->tgl_transaksi)->format('d-m-Y H:i') }}
+                                {{ \Illuminate\Support\Carbon::parse($row->tgl_transaksi)->format('d-m-Y H:i:s') }}
                             @else
                                 —
                             @endif

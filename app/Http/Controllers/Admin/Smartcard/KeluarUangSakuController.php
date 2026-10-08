@@ -330,15 +330,16 @@ class KeluarUangSakuController extends Controller
                 ->with('smartcard_error', 'Pilih siswa atau cari nama terlebih dahulu untuk export.');
         }
 
+        // Export hanya sccttran REFFBANK=24
         $query = DB::connection('DATA_MYSQL')
-            ->table('scctcashout as co')
-            ->join('scctcust as c', 'co.CUSTID', '=', 'c.CUSTID')
-            ->whereRaw('UPPER(TRIM(co.FIDBANK)) = ?', ['CASH']);
+            ->table('sccttran as t')
+            ->join('scctcust as c', 't.CUSTID', '=', 'c.CUSTID')
+            ->whereRaw('TRIM(COALESCE(t.REFFBANK, \'\')) = ?', [self::REFFBANK]);
 
         $this->applySchoolScope($query, 'c');
 
         if ($custid > 0) {
-            $query->where('co.CUSTID', $custid);
+            $query->where('t.CUSTID', $custid);
         } elseif ($namaFilter !== '') {
             $query->where(function ($w) use ($namaFilter) {
                 $w->where('c.NMCUST', 'like', '%' . $namaFilter . '%')
@@ -346,23 +347,22 @@ class KeluarUangSakuController extends Controller
             });
         }
 
-        $userParts = [];
-        if ($this->hasColumn('scctcashout', 'users')) {
-            $userParts[] = "NULLIF(TRIM(co.users), '')";
-        }
-        $userParts[] = "NULLIF(TRIM(co.Teller), '')";
-        $userExpr = 'COALESCE(' . implode(', ', $userParts) . ", '-')";
+        $ketCol = $this->hasColumn('sccttran', 'Keterangan') ? 't.Keterangan as keterangan' : DB::raw("'' as keterangan");
 
         $rows = $query
-            ->orderByDesc('co.TanggalKeluar')
+            ->orderByDesc('t.TRXDATE')
+            ->orderByDesc('t.urut')
             ->limit(5000)
             ->get([
                 'c.NOCUST as nis',
                 'c.NMCUST as nama',
-                'co.TRANSNO as no_transaksi',
-                'co.TanggalKeluar as tgl_transaksi',
-                'co.BILLAM as jumlah',
-                DB::raw("{$userExpr} as user_login"),
+                DB::raw("COALESCE(NULLIF(TRIM(t.TRANSNO), ''), NULLIF(TRIM(t.NOREFF), ''), '-') as no_transaksi"),
+                't.TRXDATE as tgl_transaksi',
+                't.KREDIT as kredit',
+                't.DEBET as debet',
+                't.FIDBANK as fidbank',
+                't.METODE as metode',
+                $ketCol,
             ]);
 
         if ($rows->isEmpty()) {
@@ -372,41 +372,39 @@ class KeluarUangSakuController extends Controller
                     'search' => $namaFilter !== '' ? 1 : null,
                     'q' => $namaFilter !== '' ? $namaFilter : null,
                 ]))
-                ->with('smartcard_error', 'Tidak ada data cash keluar untuk diexport.');
+                ->with('smartcard_error', 'Tidak ada transaksi REFFBANK 24 untuk diexport.');
         }
 
         $exportRows = [];
         $no = 1;
-        $total = 0;
+        $totalKredit = 0;
+        $totalDebet = 0;
         $siswaNama = trim((string) ($rows->first()->nama ?? 'siswa'));
         foreach ($rows as $row) {
-            $jumlah = (int) ($row->jumlah ?? 0);
-            $total += $jumlah;
-            $tgl = '';
-            if (!empty($row->tgl_transaksi)) {
-                try {
-                    $tgl = Carbon::parse($row->tgl_transaksi)->format('Y-m-d H:i:s');
-                } catch (\Throwable) {
-                    $tgl = (string) $row->tgl_transaksi;
-                }
-            }
+            $kredit = (int) ($row->kredit ?? 0);
+            $debet = (int) ($row->debet ?? 0);
+            $totalKredit += $kredit;
+            $totalDebet += $debet;
             $exportRows[] = [
                 $no++,
                 $row->nis ?? '',
                 $row->nama ?? '',
                 $row->no_transaksi ?? '',
-                $tgl,
-                $jumlah,
-                $row->user_login ?? '',
+                SmartcardExcelExport::datetimeCell($row->tgl_transaksi ?? null),
+                $row->fidbank ?? '',
+                $row->metode ?? '',
+                $kredit,
+                $debet,
+                $row->keterangan ?? '',
             ];
         }
-        $exportRows[] = ['', '', '', '', 'TOTAL', $total, ''];
+        $exportRows[] = ['', '', '', '', 'TOTAL', '', '', $totalKredit, $totalDebet, ''];
 
         $safeName = preg_replace('/[^A-Za-z0-9_-]+/', '-', $siswaNama) ?: 'siswa';
 
         return SmartcardExcelExport::download(
             'keluar-uang-saku-' . $safeName . '-' . date('Ymd-His'),
-            ['No', 'NIS', 'Nama', 'No Transaksi', 'Tgl Keluar', 'Jumlah', 'User'],
+            ['No', 'NIS', 'Nama', 'No Transaksi', 'Tgl Transaksi', 'FIDBANK', 'Metode', 'Masuk', 'Keluar', 'Keterangan'],
             $exportRows
         );
     }
@@ -439,49 +437,79 @@ class KeluarUangSakuController extends Controller
 
     private function fetchSiswaList(string $q): Collection
     {
-        if (!SmartcardSaldo::hasView()) {
-            return collect();
-        }
+        $mapRow = static function ($row, int $saldo = 0) {
+            return (object) [
+                'custid' => (int) ($row->CUSTID ?? 0),
+                'nis' => trim((string) (($row->NOCUST ?? '') !== '' ? $row->NOCUST : ($row->NUM2ND ?? ''))),
+                'nama' => trim((string) ($row->NMCUST ?? '')),
+                'saldo' => $saldo > 0 ? $saldo : (int) ($row->SALDO ?? 0),
+                'kelas' => trim((string) ($row->DESC02 ?? '')),
+                'kelompok' => trim((string) ($row->DESC03 ?? '')),
+                'jenjang' => trim((string) ($row->CODE02 ?? '')),
+            ];
+        };
 
-        try {
-            $view = SmartcardSaldo::VIEW;
-            $query = DB::connection('DATA_MYSQL')->table("{$view} as v");
-            $this->applySchoolScope($query, 'v');
+        if (SmartcardSaldo::hasView()) {
+            try {
+                $view = SmartcardSaldo::VIEW;
+                $query = DB::connection('DATA_MYSQL')->table("{$view} as v");
+                $this->applySchoolScope($query, 'v');
 
-            if ($q !== '') {
-                $query->where(function ($w) use ($q) {
-                    $w->where('v.NOCUST', 'like', '%' . $q . '%')
-                        ->orWhere('v.NUM2ND', 'like', '%' . $q . '%')
-                        ->orWhereRaw('LOWER(v.NMCUST) LIKE ?', ['%' . mb_strtolower($q) . '%']);
-                });
+                if ($q !== '') {
+                    $query->where(function ($w) use ($q) {
+                        $w->where('v.NOCUST', 'like', '%' . $q . '%')
+                            ->orWhere('v.NUM2ND', 'like', '%' . $q . '%')
+                            ->orWhereRaw('LOWER(v.NMCUST) LIKE ?', ['%' . mb_strtolower($q) . '%']);
+                    });
+                }
+
+                try {
+                    $rows = $query->orderBy('v.CUSTID')->limit(100)->get([
+                        'v.CUSTID', 'v.NOCUST', 'v.NUM2ND', 'v.NMCUST', 'v.SALDO',
+                        'v.DESC02', 'v.DESC03', 'v.CODE02',
+                    ]);
+                } catch (\Throwable) {
+                    $rows = $query->orderBy('v.CUSTID')->limit(100)->get([
+                        'v.CUSTID', 'v.NOCUST', 'v.NMCUST', 'v.SALDO',
+                        'v.DESC02', 'v.DESC03', 'v.CODE02',
+                    ]);
+                }
+
+                if ($rows->isNotEmpty()) {
+                    return $rows->map(fn ($row) => $mapRow($row));
+                }
+            } catch (\Throwable) {
+                // fallback
             }
-
-            return $query
-                ->orderBy('v.CUSTID')
-                ->limit(100)
-                ->get([
-                    'v.CUSTID',
-                    'v.NOCUST',
-                    'v.NMCUST',
-                    'v.SALDO',
-                    'v.DESC02',
-                    'v.DESC03',
-                    'v.CODE02',
-                ])
-                ->map(function ($row) {
-                    return (object) [
-                        'custid' => (int) $row->CUSTID,
-                        'nis' => trim((string) ($row->NOCUST ?? '')),
-                        'nama' => trim((string) ($row->NMCUST ?? '')),
-                        'saldo' => (int) ($row->SALDO ?? 0),
-                        'kelas' => trim((string) ($row->DESC02 ?? '')),
-                        'kelompok' => trim((string) ($row->DESC03 ?? '')),
-                        'jenjang' => trim((string) ($row->CODE02 ?? '')),
-                    ];
-                });
-        } catch (\Throwable) {
-            return collect();
         }
+
+        $query = DB::connection('DATA_MYSQL')
+            ->table('scctcust as c')
+            ->where('c.STCUST', 1);
+        $this->applySchoolScope($query, 'c');
+
+        if ($q !== '') {
+            $query->where(function ($w) use ($q) {
+                $w->where('c.NOCUST', 'like', '%' . $q . '%')
+                    ->orWhere('c.NUM2ND', 'like', '%' . $q . '%')
+                    ->orWhereRaw('LOWER(c.NMCUST) LIKE ?', ['%' . mb_strtolower($q) . '%']);
+            });
+        }
+
+        $found = $query
+            ->orderBy('c.NMCUST')
+            ->limit(100)
+            ->get(['c.CUSTID', 'c.NOCUST', 'c.NUM2ND', 'c.NMCUST', 'c.DESC02', 'c.DESC03', 'c.CODE02']);
+
+        $saldoMap = SmartcardSaldo::map(
+            $found->pluck('CUSTID')->map(static fn ($id) => (int) $id)->all()
+        );
+
+        return $found->map(function ($row) use ($mapRow, $saldoMap) {
+            $cid = (int) ($row->CUSTID ?? 0);
+
+            return $mapRow($row, (int) ($saldoMap[$cid] ?? 0));
+        });
     }
 
     private function fetchSaldo(int $custid): int
@@ -539,9 +567,11 @@ class KeluarUangSakuController extends Controller
             $cols[] = 'METODE as metode_alt';
         }
 
+        // Riwayat transaksi: hanya sccttran REFFBANK=24
         return DB::connection('DATA_MYSQL')
             ->table('sccttran')
             ->where('CUSTID', $custid)
+            ->whereRaw('TRIM(COALESCE(REFFBANK, \'\')) = ?', [self::REFFBANK])
             ->orderByDesc('TRXDATE')
             ->orderByDesc('urut')
             ->limit($limit)
@@ -616,7 +646,7 @@ class KeluarUangSakuController extends Controller
             return '-';
         }
         try {
-            return Carbon::parse($value)->format('d/m/Y H:i');
+            return Carbon::parse($value)->format('Y-m-d H:i:s');
         } catch (\Throwable) {
             return (string) $value;
         }

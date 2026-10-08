@@ -75,6 +75,14 @@
                         <input type="date" class="form-control" name="sampai_tanggal"
                                value="{{ ($filters['sampai_tanggal'] ?? '') !== '0000-00-00' ? ($filters['sampai_tanggal'] ?? '') : '' }}">
                     </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Tampil data</label>
+                        <select class="form-select" name="per_page">
+                            @foreach (($perPageOptions ?? [10, 25, 50, 100, 200]) as $opt)
+                                <option value="{{ $opt }}" @selected((int) ($perPage ?? 25) === (int) $opt)>{{ $opt }}</option>
+                            @endforeach
+                        </select>
+                    </div>
                     <div class="col-md-6 d-flex align-items-end gap-2 flex-wrap">
                         <button type="submit" class="btn btn-primary">Cari</button>
                         <button type="submit" form="rtFormCetak" class="btn btn-outline-primary" @disabled(!($isSearch ?? false))>
@@ -97,6 +105,7 @@
                 <input type="hidden" name="nama" value="{{ $filters['nama'] ?? '' }}">
                 <input type="hidden" name="dari_tanggal" value="{{ $filters['dari_tanggal'] ?? '' }}">
                 <input type="hidden" name="sampai_tanggal" value="{{ $filters['sampai_tanggal'] ?? '' }}">
+                <input type="hidden" name="per_page" value="{{ $filters['per_page'] ?? ($perPage ?? 25) }}">
             </form>
         </div>
     </div>

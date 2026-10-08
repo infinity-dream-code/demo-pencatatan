@@ -74,11 +74,7 @@ class TransaksiBelanjaController extends Controller
             $total += $debet;
             $tgl = '';
             if (!empty($row->tgl_transaksi)) {
-                try {
-                    $tgl = Carbon::parse($row->tgl_transaksi)->format('d-m-Y H:i');
-                } catch (\Throwable) {
-                    $tgl = (string) $row->tgl_transaksi;
-                }
+                $tgl = SmartcardExcelExport::datetimeCell($row->tgl_transaksi, 'd-m-Y H:i:s');
             }
 
             $exportRows[] = [

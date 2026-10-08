@@ -89,6 +89,35 @@
                 <input type="hidden" name="no_kartu" id="noKartuSave" value="{{ $noKartu ?? '' }}">
                 <input type="hidden" name="pin" id="pinSave" value="{{ $pin ?? '123' }}">
             </form>
+
+            <form id="formUpdatePin" method="POST" action="{{ route('admin.smartcard.data-kartu-siswa.update-pin') }}" class="d-none">
+                @csrf
+                <input type="hidden" name="no_kartu" id="editNoKartu" value="">
+                <input type="hidden" name="pin" id="editPinHidden" value="">
+                <input type="hidden" name="per_page" value="{{ (int) ($perPage ?? 10) }}">
+            </form>
+        </div>
+    </div>
+
+    <div class="modal fade" id="modalEditPin" tabindex="-1" aria-labelledby="modalEditPinLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalEditPinLabel">Edit PIN Kartu</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2"><strong id="editPinNama">—</strong></p>
+                    <p class="text-muted small mb-3">No Kartu: <code id="editPinNoKartuLabel">—</code></p>
+                    <label class="form-label" for="editPinInput">PIN baru</label>
+                    <input type="text" class="form-control" id="editPinInput" maxlength="20" placeholder="123">
+                    <small class="text-muted">Hanya PIN yang bisa diubah.</small>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
+                    <button type="button" class="btn btn-primary" id="btnSaveEditPin">Simpan PIN</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -113,6 +142,8 @@
                         <th>NIS</th>
                         <th>Nama</th>
                         <th>No Kartu</th>
+                        <th>PIN</th>
+                        <th style="width:100px;">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -122,10 +153,19 @@
                             <td>{{ $row->nis ?? '—' }}</td>
                             <td>{{ $row->nama ?? '—' }}</td>
                             <td>{{ $row->no_kartu ?? '—' }}</td>
+                            <td>{{ $row->pin ?? '—' }}</td>
+                            <td>
+                                <button type="button" class="btn btn-sm btn-outline-primary btn-edit-pin"
+                                        data-no-kartu="{{ $row->no_kartu ?? '' }}"
+                                        data-pin="{{ $row->pin ?? '123' }}"
+                                        data-nama="{{ $row->nama ?? '' }}">
+                                    Edit PIN
+                                </button>
+                            </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="4" class="text-center text-muted py-4">Data kartu tidak ditemukan.</td>
+                            <td colspan="6" class="text-center text-muted py-4">Data kartu tidak ditemukan.</td>
                         </tr>
                     @endforelse
                 </tbody>
@@ -339,6 +379,35 @@
 
             window.addEventListener('beforeunload', stopBarcodeScanner);
             syncSaveFields();
+
+            document.querySelectorAll('.btn-edit-pin').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const noKartu = btn.getAttribute('data-no-kartu') || '';
+                    const pin = btn.getAttribute('data-pin') || '123';
+                    const nama = btn.getAttribute('data-nama') || '—';
+                    document.getElementById('editNoKartu').value = noKartu;
+                    document.getElementById('editPinInput').value = pin;
+                    document.getElementById('editPinNama').textContent = nama;
+                    document.getElementById('editPinNoKartuLabel').textContent = noKartu || '—';
+                    const modalEl = document.getElementById('modalEditPin');
+                    if (window.bootstrap && bootstrap.Modal) {
+                        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+                    } else {
+                        modalEl.style.display = 'block';
+                        modalEl.classList.add('show');
+                    }
+                });
+            });
+
+            document.getElementById('btnSaveEditPin')?.addEventListener('click', function () {
+                const pin = String(document.getElementById('editPinInput').value || '').trim();
+                if (!pin) {
+                    alert('PIN wajib diisi.');
+                    return;
+                }
+                document.getElementById('editPinHidden').value = pin;
+                document.getElementById('formUpdatePin').submit();
+            });
         })();
     </script>
 @endsection

@@ -29,17 +29,18 @@ class SmartcardSaldo
         }
 
         try {
-            if (Schema::connection('DATA_MYSQL')->hasTable(self::VIEW)) {
-                $rows = DB::connection('DATA_MYSQL')
-                    ->table(self::VIEW)
-                    ->whereIn('CUSTID', $custids)
-                    ->get(['CUSTID', 'SALDO']);
+            $rows = DB::connection('DATA_MYSQL')
+                ->table(self::VIEW)
+                ->whereIn('CUSTID', $custids)
+                ->get(['CUSTID', 'SALDO']);
 
-                $map = [];
-                foreach ($rows as $row) {
-                    $map[(int) $row->CUSTID] = (int) ($row->SALDO ?? 0);
-                }
+            $map = [];
+            foreach ($rows as $row) {
+                $map[(int) $row->CUSTID] = (int) ($row->SALDO ?? 0);
+            }
 
+            // Jika semua CUSTID ketemu di view, pakai hasil view (meski saldo 0)
+            if ($map !== [] || self::hasView()) {
                 return $map;
             }
         } catch (\Throwable) {
@@ -63,7 +64,17 @@ class SmartcardSaldo
     public static function hasView(): bool
     {
         try {
-            return Schema::connection('DATA_MYSQL')->hasTable(self::VIEW);
+            if (Schema::connection('DATA_MYSQL')->hasTable(self::VIEW)) {
+                return true;
+            }
+        } catch (\Throwable) {
+        }
+
+        // hasTable kadang tidak mendeteksi VIEW — coba query langsung
+        try {
+            DB::connection('DATA_MYSQL')->table(self::VIEW)->limit(1)->get(['CUSTID']);
+
+            return true;
         } catch (\Throwable) {
             return false;
         }

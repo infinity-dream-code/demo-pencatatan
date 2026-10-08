@@ -225,6 +225,9 @@ class TopupSaldoController extends Controller
                 $nominal,
                 $loginUser
             ) {
+                // Muallimaat cash topup: FIDBANK selalu CASH + REFFBANK 24
+                $fidbank = $metode === 'CASH' || $metode === '' ? 'CASH' : $metode;
+
                 $topupRow = [
                     'CUSTID' => $custid,
                     'NOREFF' => $transNo,
@@ -233,15 +236,21 @@ class TopupSaldoController extends Controller
                     'KDCHANNEL' => 11,
                     'DEBET' => 0,
                     'KREDIT' => $nominal,
-                    'FIDBANK' => $metode,
+                    'FIDBANK' => $fidbank,
                     'TRANSNO' => $transNo,
                     'METODE' => 'TOP UP',
                 ];
-                if ($this->hasColumn('sccttran', 'Keterangan')) {
-                    $topupRow['Keterangan'] = $ket !== '' ? $ket : null;
+
+                $ketCol = $this->firstExistingColumn('sccttran', ['Keterangan', 'keterangan', 'KET', 'ket', 'NOTE', 'Note']);
+                if ($ketCol !== null) {
+                    $topupRow[$ketCol] = $ket !== '' ? $ket : null;
                 }
                 if ($this->hasColumn('sccttran', 'HELPDESK')) {
-                    $topupRow['HELPDESK'] = 'User: ' . $loginUser;
+                    $help = 'User: ' . $loginUser;
+                    if ($ket !== '') {
+                        $help .= ' | Ket: ' . $ket;
+                    }
+                    $topupRow['HELPDESK'] = $help;
                 }
                 if ($this->hasColumn('sccttran', 'MERCHANT')) {
                     $topupRow['MERCHANT'] = $loginUser;
@@ -260,6 +269,10 @@ class TopupSaldoController extends Controller
                     $userCol = $this->smTopupUserColumn();
                     if ($userCol !== null) {
                         $topupInsert[$userCol] = $loginUser;
+                    }
+                    $smKetCol = $this->firstExistingColumn('sm_topup', ['Keterangan', 'keterangan', 'KET', 'ket', 'NOTE', 'Note']);
+                    if ($smKetCol !== null && $ket !== '') {
+                        $topupInsert[$smKetCol] = $ket;
                     }
                     DB::connection('DATA_MYSQL')->table('sm_topup')->insert($topupInsert);
                 }
@@ -350,20 +363,12 @@ class TopupSaldoController extends Controller
         foreach ($rows as $row) {
             $nominal = (int) ($row->topup ?? 0);
             $total += $nominal;
-            $tgl = '';
-            if (!empty($row->tgl_transaksi)) {
-                try {
-                    $tgl = Carbon::parse($row->tgl_transaksi)->format('Y-m-d H:i:s');
-                } catch (\Throwable) {
-                    $tgl = (string) $row->tgl_transaksi;
-                }
-            }
             $exportRows[] = [
                 $no++,
                 $row->nis ?? '',
                 $row->nama ?? '',
                 $row->no_transaksi ?? '',
-                $tgl,
+                SmartcardExcelExport::datetimeCell($row->tgl_transaksi ?? null),
                 $nominal,
                 $row->user_login ?? '',
             ];
@@ -479,47 +484,82 @@ class TopupSaldoController extends Controller
 
     private function fetchSiswaList(string $q)
     {
-        if (!SmartcardSaldo::hasView()) {
-            return collect();
+        $mapRow = static function ($row, int $saldo = 0) {
+            return (object) [
+                'custid' => (int) ($row->CUSTID ?? 0),
+                'nis' => trim((string) (($row->NOCUST ?? '') !== '' ? $row->NOCUST : ($row->NUM2ND ?? ''))),
+                'nama' => trim((string) ($row->NMCUST ?? '')),
+                'saldo' => $saldo > 0 ? $saldo : (int) ($row->SALDO ?? 0),
+                'kelas' => trim((string) ($row->DESC02 ?? '')),
+                'kelompok' => trim((string) ($row->DESC03 ?? '')),
+                'jenjang' => trim((string) ($row->CODE02 ?? '')),
+            ];
+        };
+
+        if (SmartcardSaldo::hasView()) {
+            try {
+                $view = SmartcardSaldo::VIEW;
+                $query = DB::connection('DATA_MYSQL')->table("{$view} as v");
+                $this->applySchoolScope($query, 'v');
+
+                if ($q !== '') {
+                    $query->where(function ($w) use ($q) {
+                        $w->where('v.NOCUST', 'like', '%' . $q . '%')
+                            ->orWhere('v.NUM2ND', 'like', '%' . $q . '%')
+                            ->orWhereRaw('LOWER(v.NMCUST) LIKE ?', ['%' . mb_strtolower($q) . '%']);
+                    });
+                }
+
+                // Kolom view bisa beda antar sekolah — coba select minimal dulu
+                $select = ['v.CUSTID', 'v.NOCUST', 'v.NMCUST', 'v.SALDO'];
+                foreach (['v.NUM2ND', 'v.DESC02', 'v.DESC03', 'v.CODE02'] as $optCol) {
+                    $select[] = $optCol;
+                }
+
+                try {
+                    $rows = $query->orderBy('v.CUSTID')->limit(100)->get($select);
+                } catch (\Throwable) {
+                    $rows = $query->orderBy('v.CUSTID')->limit(100)->get([
+                        'v.CUSTID', 'v.NOCUST', 'v.NMCUST', 'v.SALDO',
+                    ]);
+                }
+
+                if ($rows->isNotEmpty()) {
+                    return $rows->map(fn ($row) => $mapRow($row));
+                }
+            } catch (\Throwable) {
+                // fallback ke scctcust
+            }
         }
 
-        $view = SmartcardSaldo::VIEW;
+        // Fallback: scctcust + saldo dari v_saldo_saku / aggregate
         $query = DB::connection('DATA_MYSQL')
-            ->table("{$view} as v");
-
-        $this->applySchoolScope($query, 'v');
+            ->table('scctcust as c')
+            ->where('c.STCUST', 1);
+        $this->applySchoolScope($query, 'c');
 
         if ($q !== '') {
             $query->where(function ($w) use ($q) {
-                $w->where('v.NOCUST', 'like', '%' . $q . '%')
-                    ->orWhere('v.NUM2ND', 'like', '%' . $q . '%')
-                    ->orWhereRaw('LOWER(v.NMCUST) LIKE ?', ['%' . mb_strtolower($q) . '%']);
+                $w->where('c.NOCUST', 'like', '%' . $q . '%')
+                    ->orWhere('c.NUM2ND', 'like', '%' . $q . '%')
+                    ->orWhereRaw('LOWER(c.NMCUST) LIKE ?', ['%' . mb_strtolower($q) . '%']);
             });
         }
 
-        return $query
-            ->orderBy('v.CUSTID')
+        $found = $query
+            ->orderBy('c.NMCUST')
             ->limit(100)
-            ->get([
-                'v.CUSTID',
-                'v.NOCUST',
-                'v.NMCUST',
-                'v.SALDO',
-                'v.DESC02',
-                'v.DESC03',
-                'v.CODE02',
-            ])
-            ->map(function ($row) {
-                return (object) [
-                    'custid' => (int) $row->CUSTID,
-                    'nis' => trim((string) ($row->NOCUST ?? '')),
-                    'nama' => trim((string) ($row->NMCUST ?? '')),
-                    'saldo' => (int) ($row->SALDO ?? 0),
-                    'kelas' => trim((string) ($row->DESC02 ?? '')),
-                    'kelompok' => trim((string) ($row->DESC03 ?? '')),
-                    'jenjang' => trim((string) ($row->CODE02 ?? '')),
-                ];
-            });
+            ->get(['c.CUSTID', 'c.NOCUST', 'c.NUM2ND', 'c.NMCUST', 'c.DESC02', 'c.DESC03', 'c.CODE02']);
+
+        $saldoMap = SmartcardSaldo::map(
+            $found->pluck('CUSTID')->map(static fn ($id) => (int) $id)->all()
+        );
+
+        return $found->map(function ($row) use ($mapRow, $saldoMap) {
+            $cid = (int) ($row->CUSTID ?? 0);
+
+            return $mapRow($row, (int) ($saldoMap[$cid] ?? 0));
+        });
     }
 
     private function fetchSaldo(int $custid): int
@@ -559,20 +599,25 @@ class TopupSaldoController extends Controller
 
     private function fetchTranRows(int $custid)
     {
-        $cols = ['TRXDATE as tanggal', 'METODE as metode', 'KREDIT as kredit', 'DEBET as debet'];
-        if ($this->hasColumn('sccttran', 'Keterangan')) {
-            $cols[] = 'Keterangan as keterangan';
+        $ketCol = $this->firstExistingColumn('sccttran', ['Keterangan', 'keterangan', 'KET', 'ket']);
+        $cols = ['TRXDATE as tanggal', 'METODE as metode', 'KREDIT as kredit', 'DEBET as debet', 'FIDBANK', 'REFFBANK'];
+        if ($ketCol !== null) {
+            $cols[] = DB::raw("`{$ketCol}` as keterangan");
         }
 
         return DB::connection('DATA_MYSQL')
             ->table('sccttran')
             ->where('CUSTID', $custid)
+            ->whereRaw("UPPER(TRIM(COALESCE(FIDBANK, ''))) = 'CASH'")
+            ->whereRaw("TRIM(COALESCE(REFFBANK, '')) = ?", [self::REFFBANK])
             ->orderByDesc('TRXDATE')
             ->orderByDesc('urut')
             ->limit(80)
             ->get($cols)
             ->map(function ($r) {
-                $r->keterangan = $r->keterangan ?? '-';
+                $r->keterangan = trim((string) ($r->keterangan ?? '')) !== ''
+                    ? trim((string) $r->keterangan)
+                    : '-';
 
                 return $r;
             });
@@ -676,6 +721,18 @@ class TopupSaldoController extends Controller
     {
         foreach (['users', 'user', 'User'] as $col) {
             if ($this->hasColumn('sm_topup', $col)) {
+                return $col;
+            }
+        }
+
+        return null;
+    }
+
+    /** @param  list<string>  $candidates */
+    private function firstExistingColumn(string $table, array $candidates): ?string
+    {
+        foreach ($candidates as $col) {
+            if ($this->hasColumn($table, $col)) {
                 return $col;
             }
         }

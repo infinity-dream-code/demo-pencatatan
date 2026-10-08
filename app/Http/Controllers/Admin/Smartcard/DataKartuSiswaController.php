@@ -79,14 +79,57 @@ class DataKartuSiswaController extends Controller
                 $row->nis ?? '',
                 $row->nama ?? '',
                 $row->no_kartu ?? '',
+                $row->pin ?? '',
             ];
         }
 
         return SmartcardExcelExport::download(
             'data-kartu-siswa-' . date('Ymd-His'),
-            ['No', 'NIS', 'Nama', 'No Kartu'],
+            ['No', 'NIS', 'Nama', 'No Kartu', 'PIN'],
             $exportRows
         );
+    }
+
+    public function updatePin(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'no_kartu' => ['required', 'string', 'max:50'],
+            'pin' => ['required', 'string', 'max:20'],
+        ], [
+            'no_kartu.required' => 'Nomor kartu tidak valid.',
+            'pin.required' => 'PIN wajib diisi.',
+        ]);
+
+        $noKartu = trim((string) $validated['no_kartu']);
+        $pin = trim((string) $validated['pin']);
+        if ($pin === '') {
+            $pin = '123';
+        }
+
+        $query = DB::connection('DATA_MYSQL')
+            ->table('sm_pin')
+            ->join('scctcust', 'sm_pin.CUSTID', '=', 'scctcust.CUSTID')
+            ->where('sm_pin.PID', $noKartu);
+        $this->applySchoolScope($query, 'scctcust');
+
+        if (!$query->exists()) {
+            return redirect()
+                ->back()
+                ->with('smartcard_error', 'Data kartu tidak ditemukan.');
+        }
+
+        DB::connection('DATA_MYSQL')
+            ->table('sm_pin')
+            ->where('PID', $noKartu)
+            ->update(['PIN' => $pin]);
+
+        return redirect()
+            ->route('admin.smartcard.data-kartu-siswa.index', array_filter([
+                'search' => 1,
+                'no_kartu' => $noKartu,
+                'per_page' => $request->input('per_page'),
+            ]))
+            ->with('smartcard_success', 'PIN kartu berhasil diubah.');
     }
 
     public function store(Request $request): RedirectResponse
@@ -211,6 +254,8 @@ class DataKartuSiswaController extends Controller
                 'scctcust.NOCUST as nis',
                 'scctcust.NMCUST as nama',
                 'sm_pin.PID as no_kartu',
+                'sm_pin.PIN as pin',
+                'sm_pin.CUSTID as custid',
             ]);
 
         $this->applySchoolScope($query, 'scctcust');
