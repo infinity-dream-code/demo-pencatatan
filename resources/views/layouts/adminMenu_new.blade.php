@@ -247,6 +247,8 @@
 
     
 
+        {{-- Pengumuman & Infaq disembunyikan --}}
+        {{--
         <li class="menu-item {{ Request::is(['admin/pengumuman*']) ? 'active' : '' }}">
             <a href="{{ url('admin/pengumuman') }}" class="menu-link">
                 <i class="menu-icon ri ri-megaphone-line"></i>
@@ -272,6 +274,7 @@
                 </li>
             </ul>
         </li>
+        --}}
 
         <li class="menu-item {{ Request::is(['admin/smartcard*']) ? 'active open' : '' }}">
             <a href="javascript:void(0);" class="menu-link menu-toggle">
