@@ -374,12 +374,15 @@
             </ul>
         </li>
 
+        {{-- Update Musrifah disembunyikan --}}
+        {{--
         <li class="menu-item {{ Request::is(['admin/update-musrifah*']) ? 'active' : '' }}">
             <a href="{{ route('admin.update-musrifah.index') }}" class="menu-link">
                 <i class="menu-icon ri ri-user-settings-line"></i>
                 <div data-i18n="Update Musrifah">Update Musrifah</div>
             </a>
         </li>
+        --}}
 
         <li class="menu-item mt-auto pb-2">
             <a href="{{route('logout')}}" class="menu-link btn-danger text-white" onclick="event.preventDefault(); document.getElementById('logout-form').submit();">
