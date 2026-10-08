@@ -16,13 +16,13 @@ return [
     |
     */
 
-    'name' => env('APP_NAME', 'Laravel'),
-    'nama_instansi' => env('APP_NAMA_INSTANSI', 'YAYASAN PENDIDIKAN ISLAM SABILUL'),
+    'name' => env('APP_NAME', 'demo pencatatan'),
+    'nama_instansi' => env('APP_NAMA_INSTANSI', 'demo pencatatan'),
     'alamat' => env('APP_ALAMAT', 'SIKEU'),
     'email' => env('APP_EMAIL', 'ypisabkho@gmail.com'),
     'telepon' => env('APP_TELEPON', 'SIKEU'),
     'domisili' => env('APP_DOMISILI', 'SALATIGA'),
-    'nova' => env('APP_NOVA', 123456),
+    'nova' => env('APP_NOVA', 751000),
     'biaya_admin' => env('BIAYA_ADMIN', 0),
     'dummy_seeder' => env('DUMMY_SEEDER',false),
     'demo_mode' => env('DEMO_MODE',false),

@@ -18,7 +18,7 @@
     <meta name="description" content="Core system ICT "/>
 
     <!-- Favicon -->
-    <link rel="icon" type="image/x-icon" href="{{asset('favicon.ico')}}"/>
+    <link rel="icon" type="image/png" href="{{asset('ict.png')}}"/>
 
     <!-- Icons -->
 
@@ -185,7 +185,7 @@
                             <a class="nav-link dropdown-toggle hide-arrow" href="javascript:void(0);"
                                data-bs-toggle="dropdown">
                                 <div class="avatar avatar-online">
-                                    <img src="{{asset('logo.png')}}" alt class="rounded-circle">
+                                    <img src="{{asset('ict.png')}}" alt class="rounded-circle">
                                 </div>
                             </a>
                             <ul class="dropdown-menu dropdown-menu-end">
@@ -194,7 +194,7 @@
                                         <div class="d-flex">
                                             <div class="flex-shrink-0 me-2">
                                                 <div class="avatar avatar-online">
-                                                    <img src="{{asset('logo.png')}}" alt
+                                                    <img src="{{asset('ict.png')}}" alt
                                                          class="rounded-circle">
                                                 </div>
                                             </div>

@@ -602,6 +602,18 @@ Route::prefix("admin")
                     });
             });
 
+        Route::prefix("pencatatan-sederhana")
+            ->name("pencatatan-sederhana.")
+            ->controller(\App\Http\Controllers\Admin\Pencatatan\PencatatanSederhanaController::class)
+            ->group(function () {
+                Route::get("akun-kas-masuk", "akunKasMasuk")->name("akun-kas-masuk");
+                Route::get("akun-kas-keluar", "akunKasKeluar")->name("akun-kas-keluar");
+                Route::get("kas-masuk", "kasMasuk")->name("kas-masuk");
+                Route::get("kas-keluar", "kasKeluar")->name("kas-keluar");
+                Route::get("cek-pencatatan", "cekPencatatan")->name("cek-pencatatan");
+                Route::get("rekap-export-excel", "rekapExportExcel")->name("rekap-export-excel");
+            });
+
         Route::prefix("update-musrifah")
             ->name("update-musrifah.")
             ->controller(\App\Http\Controllers\Admin\UpdateMusrifahController::class)

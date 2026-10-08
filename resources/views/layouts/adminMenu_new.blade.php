@@ -1,12 +1,12 @@
 <aside id="layout-menu" class="layout-menu menu-vertical menu bg-menu-theme">
     <div class="app-brand demo">
-        <a href="{{route('admin.index')}}" class="app-brand-link">
+        <a href="{{route('admin.index')}}" class="app-brand-link" style="min-width: 0; flex: 1;">
             <span class="app-brand-logo demo">
                 <span style="color: var(--bs-primary)">
-                    <img width="50" height="50" src="{{asset('logo.png')}}" alt="logo">
+                    <img width="50" height="50" src="{{asset('ict.png')}}" alt="logo">
                 </span>
             </span>
-            <span class="app-brand-text demo menu-text fw-bold ms-2">SIKEU</span>
+            <span class="app-brand-text demo menu-text fw-bold ms-2" style="font-size: .95rem; line-height: 1.15; white-space: normal; flex-shrink: 1;">{{ config('app.name') }}</span>
         </a>
         <a href="javascript:void(0);" class="layout-menu-toggle menu-link text-large ms-auto">
             <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -327,6 +327,45 @@
                 <li class="menu-item {{ Request::is(['admin/smartcard/tap-ambil-rutin*']) ? 'active' : '' }}">
                     <a href="{{ route('admin.smartcard.tap-ambil-rutin.index') }}" class="menu-link">
                         <div>Tap Ambil Rutin</div>
+                    </a>
+                </li>
+            </ul>
+        </li>
+
+        <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana*']) ? 'active open' : '' }}">
+            <a href="javascript:void(0);" class="menu-link menu-toggle">
+                <i class="menu-icon ri ri-booklet-line"></i>
+                <div data-i18n="Pencatatan Sederhana">Pencatatan Sederhana</div>
+            </a>
+            <ul class="menu-sub">
+                <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana/akun-kas-masuk*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.pencatatan-sederhana.akun-kas-masuk') }}" class="menu-link">
+                        <div>Akun Kas Masuk</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana/akun-kas-keluar*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.pencatatan-sederhana.akun-kas-keluar') }}" class="menu-link">
+                        <div>Akun Kas Keluar</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana/kas-masuk*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.pencatatan-sederhana.kas-masuk') }}" class="menu-link">
+                        <div>Kas Masuk</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana/kas-keluar*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.pencatatan-sederhana.kas-keluar') }}" class="menu-link">
+                        <div>Kas Keluar</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana/cek-pencatatan*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.pencatatan-sederhana.cek-pencatatan') }}" class="menu-link">
+                        <div>Cek Pencatatan</div>
+                    </a>
+                </li>
+                <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana/rekap-export-excel*']) ? 'active' : '' }}">
+                    <a href="{{ route('admin.pencatatan-sederhana.rekap-export-excel') }}" class="menu-link">
+                        <div>Rekap Export Excel</div>
                     </a>
                 </li>
             </ul>
