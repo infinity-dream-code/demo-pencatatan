@@ -52,7 +52,11 @@
                         </div>
                         <div class="mb-3"><label class="form-label required">Nominal</label><input type="number" class="form-control" name="nominal" min="1" required></div>
                         <div class="mb-3"><label class="form-label required">Keterangan</label><input type="text" class="form-control" name="keterangan" maxlength="255" required></div>
-                        <div class="mb-3"><label class="form-label">URL Foto Bukti</label><input type="url" class="form-control" name="buktiurl" placeholder="https://..."></div>
+                        <div class="mb-3">
+                            <label class="form-label">Foto Bukti</label>
+                            <input type="file" class="form-control" name="bukti_foto" accept="image/*">
+                            <div class="form-text">Upload ke Cloudinary folder <code>ponpes_markaz</code></div>
+                        </div>
                     </div>
                     <div class="modal-footer"><button type="reset" class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
                 </div>

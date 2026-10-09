@@ -153,15 +153,21 @@ class KasKeluarController extends Controller
         $kodeAkun = trim((string) $request->input('kode_akun', ''));
         $keterangan = trim((string) $request->input('keterangan', ''));
         $nominal = (int) preg_replace('/\D/', '', (string) $request->input('nominal', '0'));
-        $buktiurl = trim((string) $request->input('buktiurl', ''));
 
         $validator = Validator::make(
-            compact('tanggal', 'kode_akun', 'keterangan', 'nominal'),
+            [
+                'tanggal' => $tanggal,
+                'kode_akun' => $kodeAkun,
+                'keterangan' => $keterangan,
+                'nominal' => $nominal,
+                'bukti_foto' => $request->file('bukti_foto'),
+            ],
             [
                 'tanggal' => ['required', 'date'],
                 'kode_akun' => ['required', 'max:5'],
                 'keterangan' => ['required', 'max:255'],
                 'nominal' => ['required', 'integer', 'min:1'],
+                'bukti_foto' => ['nullable', 'image', 'max:5120'],
             ],
             ValidationMessage::messages(),
             ValidationMessage::attributes()
@@ -179,6 +185,7 @@ class KasKeluarController extends Controller
         $period = $this->periodeFromDate($tanggal);
 
         try {
+            $buktiurl = $this->resolveBuktiUrl($request);
             DB::connection('DATA_MYSQL')->beginTransaction();
             $this->insertJurnal([
                 'tanggal' => $tanggal,
@@ -188,7 +195,7 @@ class KasKeluarController extends Controller
                 'kredit' => 0,
                 'tahun' => $period['tahun'],
                 'periode' => $period['periode'],
-                'buktiurl' => $buktiurl !== '' ? $buktiurl : '-',
+                'buktiurl' => $buktiurl,
                 'NamaAkunMasuk' => null,
                 'NamaAkunKeluar' => $akun->NamaAkunKeluar,
             ]);

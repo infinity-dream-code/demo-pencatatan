@@ -58,4 +58,11 @@ return [
         "secret" => env("PORTAL_SSO_SECRET", "a7c2a8a9b3c4a5a6a7a8a9b0c1a2a3"),
     ],
 
+    "cloudinary" => [
+        "cloud_name" => env("CLOUDINARY_CLOUD_NAME", "smartpayict"),
+        "api_key" => env("CLOUDINARY_API_KEY"),
+        "api_secret" => env("CLOUDINARY_API_SECRET"),
+        "folder" => env("CLOUDINARY_FOLDER", "ponpes_markaz"),
+    ],
+
 ];

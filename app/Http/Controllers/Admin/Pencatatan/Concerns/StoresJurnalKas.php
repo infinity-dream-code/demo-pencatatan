@@ -3,8 +3,11 @@
 namespace App\Http\Controllers\Admin\Pencatatan\Concerns;
 
 use App\Models\akt_jurnal;
+use App\Support\CloudinaryUpload;
 use App\Support\PencatatanJurnalTable;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use RuntimeException;
 
 trait StoresJurnalKas
 {
@@ -51,5 +54,26 @@ trait StoresJurnalKas
         }
 
         return akt_jurnal::query()->create($payload);
+    }
+
+    /**
+     * Resolve bukti URL: upload file to Cloudinary folder ponpes_markaz, or keep pasted URL.
+     */
+    protected function resolveBuktiUrl(Request $request): string
+    {
+        if ($request->hasFile('bukti_foto')) {
+            $file = $request->file('bukti_foto');
+            if (!$file || !$file->isValid()) {
+                throw new RuntimeException('File foto bukti tidak valid.');
+            }
+
+            $uploaded = CloudinaryUpload::image($file);
+
+            return $uploaded['secure_url'];
+        }
+
+        $buktiurl = trim((string) $request->input('buktiurl', ''));
+
+        return $buktiurl !== '' ? $buktiurl : '-';
     }
 }
