@@ -342,12 +342,12 @@
             </a>
             <ul class="menu-sub">
                 <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana/akun-kas-masuk*']) ? 'active' : '' }}">
-                    <a href="{{ route('admin.pencatatan-sederhana.akun-kas-masuk') }}" class="menu-link">
+                    <a href="{{ route('admin.pencatatan-sederhana.akun-kas-masuk.index') }}" class="menu-link">
                         <div>Akun Kas Masuk</div>
                     </a>
                 </li>
                 <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana/akun-kas-keluar*']) ? 'active' : '' }}">
-                    <a href="{{ route('admin.pencatatan-sederhana.akun-kas-keluar') }}" class="menu-link">
+                    <a href="{{ route('admin.pencatatan-sederhana.akun-kas-keluar.index') }}" class="menu-link">
                         <div>Akun Kas Keluar</div>
                     </a>
                 </li>
@@ -362,12 +362,12 @@
                     </a>
                 </li>
                 <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana/cek-pencatatan*']) ? 'active' : '' }}">
-                    <a href="{{ route('admin.pencatatan-sederhana.cek-pencatatan') }}" class="menu-link">
+                    <a href="{{ route('admin.pencatatan-sederhana.cek-pencatatan.index') }}" class="menu-link">
                         <div>Cek Pencatatan</div>
                     </a>
                 </li>
                 <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana/rekap-export-excel*']) ? 'active' : '' }}">
-                    <a href="{{ route('admin.pencatatan-sederhana.rekap-export-excel') }}" class="menu-link">
+                    <a href="{{ route('admin.pencatatan-sederhana.rekap-export-excel.index') }}" class="menu-link">
                         <div>Rekap Export Excel</div>
                     </a>
                 </li>

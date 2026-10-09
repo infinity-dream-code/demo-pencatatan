@@ -604,14 +604,51 @@ Route::prefix("admin")
 
         Route::prefix("pencatatan-sederhana")
             ->name("pencatatan-sederhana.")
-            ->controller(\App\Http\Controllers\Admin\Pencatatan\PencatatanSederhanaController::class)
             ->group(function () {
-                Route::get("akun-kas-masuk", "akunKasMasuk")->name("akun-kas-masuk");
-                Route::get("akun-kas-keluar", "akunKasKeluar")->name("akun-kas-keluar");
-                Route::get("kas-masuk", "kasMasuk")->name("kas-masuk");
-                Route::get("kas-keluar", "kasKeluar")->name("kas-keluar");
-                Route::get("cek-pencatatan", "cekPencatatan")->name("cek-pencatatan");
-                Route::get("rekap-export-excel", "rekapExportExcel")->name("rekap-export-excel");
+                Route::controller(\App\Http\Controllers\Admin\Pencatatan\AkunKasMasukController::class)
+                    ->prefix("akun-kas-masuk")
+                    ->name("akun-kas-masuk.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::get("get-data", "getData")->name("get-data");
+                        Route::get("get-column", "getColumn")->name("get-column");
+                        Route::post("/", "store")->name("store");
+                    });
+
+                Route::controller(\App\Http\Controllers\Admin\Pencatatan\AkunKasKeluarController::class)
+                    ->prefix("akun-kas-keluar")
+                    ->name("akun-kas-keluar.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::get("get-data", "getData")->name("get-data");
+                        Route::get("get-column", "getColumn")->name("get-column");
+                        Route::post("/", "store")->name("store");
+                    });
+
+                Route::controller(\App\Http\Controllers\Admin\Pencatatan\CekPencatatanController::class)
+                    ->prefix("cek-pencatatan")
+                    ->name("cek-pencatatan.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::get("get-data", "getData")->name("get-data");
+                        Route::get("get-column", "getColumn")->name("get-column");
+                    });
+
+                Route::controller(\App\Http\Controllers\Admin\Pencatatan\RekapExportExcelController::class)
+                    ->prefix("rekap-export-excel")
+                    ->name("rekap-export-excel.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::get("get-data", "getData")->name("get-data");
+                        Route::get("get-column", "getColumn")->name("get-column");
+                        Route::get("export", "export")->name("export");
+                    });
+
+                Route::controller(\App\Http\Controllers\Admin\Pencatatan\PencatatanSederhanaController::class)
+                    ->group(function () {
+                        Route::get("kas-masuk", "kasMasuk")->name("kas-masuk");
+                        Route::get("kas-keluar", "kasKeluar")->name("kas-keluar");
+                    });
             });
 
         Route::prefix("update-musrifah")
