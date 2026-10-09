@@ -644,10 +644,24 @@ Route::prefix("admin")
                         Route::get("export", "export")->name("export");
                     });
 
-                Route::controller(\App\Http\Controllers\Admin\Pencatatan\PencatatanSederhanaController::class)
+                Route::controller(\App\Http\Controllers\Admin\Pencatatan\KasMasukController::class)
+                    ->prefix("kas-masuk")
+                    ->name("kas-masuk.")
                     ->group(function () {
-                        Route::get("kas-masuk", "kasMasuk")->name("kas-masuk");
-                        Route::get("kas-keluar", "kasKeluar")->name("kas-keluar");
+                        Route::get("/", "index")->name("index");
+                        Route::get("get-data", "getData")->name("get-data");
+                        Route::get("get-column", "getColumn")->name("get-column");
+                        Route::post("/", "store")->name("store");
+                    });
+
+                Route::controller(\App\Http\Controllers\Admin\Pencatatan\KasKeluarController::class)
+                    ->prefix("kas-keluar")
+                    ->name("kas-keluar.")
+                    ->group(function () {
+                        Route::get("/", "index")->name("index");
+                        Route::get("get-data", "getData")->name("get-data");
+                        Route::get("get-column", "getColumn")->name("get-column");
+                        Route::post("/", "store")->name("store");
                     });
             });
 

@@ -2,16 +2,20 @@
 
 namespace App\Http\Controllers\Admin\Pencatatan;
 
+use App\Http\Controllers\Admin\Pencatatan\Concerns\QueriesAktJurnal;
 use App\Http\Controllers\Controller;
 use App\Models\akun_kas_keluar;
 use App\Models\akun_kas_masuk;
-use App\Models\akt_jurnal_in_out;
+use App\Models\akt_jurnal;
+use App\Support\PencatatanJurnalTable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 class CekPencatatanController extends Controller
 {
+    use QueriesAktJurnal;
+
     public string $title = 'Pencatatan Sederhana';
     public string $mainTitle = 'Cek Pencatatan';
     public string $dataTitle = 'Cek Pencatatan Kas Masuk dan Kas Keluar';
@@ -23,8 +27,8 @@ class CekPencatatanController extends Controller
         $akunKeluar = collect();
 
         try {
-            if (Schema::connection('DATA_MYSQL')->hasTable('akt_jurnal_in_out')) {
-                $periodes = akt_jurnal_in_out::query()
+            if (Schema::connection('DATA_MYSQL')->hasTable(PencatatanJurnalTable::name())) {
+                $periodes = akt_jurnal::query()
                     ->whereNotNull('periode')
                     ->where('periode', '!=', '')
                     ->distinct()
@@ -49,14 +53,12 @@ class CekPencatatanController extends Controller
             Log::warning('CekPencatatan index lookup failed', ['message' => $e->getMessage()]);
         }
 
-        $defaultPeriode = $periodes[0] ?? '';
-
         return view('admin.pencatatan.cek_pencatatan.index', [
             'title' => $this->title,
             'mainTitle' => $this->mainTitle,
             'dataTitle' => $this->dataTitle,
             'periodes' => $periodes,
-            'defaultPeriode' => $defaultPeriode,
+            'defaultPeriode' => $periodes[0] ?? '',
             'akunMasuk' => $akunMasuk,
             'akunKeluar' => $akunKeluar,
             'columnsUrl' => route('admin.pencatatan-sederhana.cek-pencatatan.get-column'),
@@ -112,26 +114,7 @@ class CekPencatatanController extends Controller
                 $filter = [];
             }
 
-            $filterPeriode = trim((string) ($filter['periode'] ?? ''));
-            $filterNoBukti = trim((string) ($filter['no_bukti'] ?? ''));
-            $filterKeterangan = trim((string) ($filter['keterangan'] ?? ''));
-            $filterTanggalDari = trim((string) ($filter['tanggal_dari'] ?? ''));
-            $filterTanggalSampai = trim((string) ($filter['tanggal_sampai'] ?? ''));
-            $filterAkunMasuk = trim((string) ($filter['akun_masuk'] ?? ''));
-            $filterAkunKeluar = trim((string) ($filter['akun_keluar'] ?? ''));
-
-            $sortMap = [
-                'tanggal' => 'tanggal',
-                'no_bukti' => 'no_bukti',
-                'nominal_keluar' => 'debet',
-                'nominal_masuk' => 'kredit',
-                'keterangan' => 'keterangan',
-                'periode' => 'periode',
-                'tahun' => 'tahun',
-                'akun_kas_keluar' => 'NamaAkunKeluar',
-                'akun_kas_masuk' => 'NamaAkunMasuk',
-            ];
-
+            $sortMap = $this->jurnalSortMap();
             $columnName = 'tanggal';
             $columnSortOrder = 'asc';
 
@@ -143,82 +126,14 @@ class CekPencatatanController extends Controller
                 $columnName = $sortMap[$requested] ?? 'tanggal';
             }
 
-            $baseQuery = akt_jurnal_in_out::query()->select([
-                'urut',
-                'tanggal',
-                'no_bukti',
-                'keterangan',
-                'debet',
-                'kredit',
-                'tahun',
-                'periode',
-                'buktiurl',
-                'NamaAkunMasuk',
-                'NamaAkunKeluar',
-            ]);
-
-            $applyFilters = function ($query) use (
-                $searchValue,
-                $filterPeriode,
-                $filterNoBukti,
-                $filterKeterangan,
-                $filterTanggalDari,
-                $filterTanggalSampai,
-                $filterAkunMasuk,
-                $filterAkunKeluar
-            ) {
-                if ($searchValue !== '') {
-                    $query->where(function ($q) use ($searchValue) {
-                        $q->where('no_bukti', 'like', '%' . $searchValue . '%')
-                            ->orWhere('keterangan', 'like', '%' . $searchValue . '%')
-                            ->orWhere('periode', 'like', '%' . $searchValue . '%')
-                            ->orWhere('tahun', 'like', '%' . $searchValue . '%')
-                            ->orWhere('NamaAkunMasuk', 'like', '%' . $searchValue . '%')
-                            ->orWhere('NamaAkunKeluar', 'like', '%' . $searchValue . '%');
-                    });
-                }
-
-                if ($filterPeriode !== '' && strtolower($filterPeriode) !== 'all') {
-                    $query->where('periode', $filterPeriode);
-                }
-
-                if ($filterNoBukti !== '') {
-                    $query->where('no_bukti', 'like', '%' . $filterNoBukti . '%');
-                }
-
-                if ($filterKeterangan !== '') {
-                    $query->where('keterangan', 'like', '%' . $filterKeterangan . '%');
-                }
-
-                if ($filterTanggalDari !== '' && $filterTanggalDari !== '0000-00-00') {
-                    $query->whereDate('tanggal', '>=', $filterTanggalDari);
-                }
-
-                if ($filterTanggalSampai !== '' && $filterTanggalSampai !== '0000-00-00') {
-                    $query->whereDate('tanggal', '<=', $filterTanggalSampai);
-                }
-
-                if ($filterAkunMasuk !== '' && strtolower($filterAkunMasuk) !== 'all') {
-                    $query->where('NamaAkunMasuk', $filterAkunMasuk);
-                }
-
-                if ($filterAkunKeluar !== '' && strtolower($filterAkunKeluar) !== 'all') {
-                    $query->where('NamaAkunKeluar', $filterAkunKeluar);
-                }
-            };
-
+            $baseQuery = $this->jurnalBaseQuery();
             $totalRecords = (clone $baseQuery)->count();
 
             $filteredQuery = clone $baseQuery;
-            $applyFilters($filteredQuery);
+            $this->applyJurnalFilters($filteredQuery, $filter, $searchValue);
             $totalRecordswithFilter = (clone $filteredQuery)->count();
 
-            $saldoQuery = akt_jurnal_in_out::query();
-            $applyFilters($saldoQuery);
-            $aggregate = $saldoQuery
-                ->selectRaw('COALESCE(SUM(kredit), 0) as total_masuk, COALESCE(SUM(debet), 0) as total_keluar')
-                ->first();
-            $saldo = (int) ($aggregate->total_masuk ?? 0) - (int) ($aggregate->total_keluar ?? 0);
+            $saldo = $this->calculateJurnalSaldo($filter, $searchValue);
 
             $records = $filteredQuery
                 ->orderBy($columnName, $columnSortOrder)
@@ -226,28 +141,7 @@ class CekPencatatanController extends Controller
                 ->skip($start)
                 ->take($rowperpage)
                 ->get()
-                ->map(function ($item) {
-                    $bukti = trim((string) ($item->buktiurl ?? ''));
-                    if ($bukti === '' || $bukti === '-') {
-                        $bukti = '-';
-                    }
-
-                    return [
-                        'item_id' => $item->urut,
-                        'urut' => $item->urut,
-                        'tanggal' => $item->tanggal,
-                        'no_bukti' => $item->no_bukti ?? '',
-                        'nominal_keluar' => (int) ($item->debet ?? 0),
-                        'nominal_masuk' => (int) ($item->kredit ?? 0),
-                        'keterangan' => $item->keterangan ?? '',
-                        'foto' => $bukti,
-                        'buktiurl' => $bukti,
-                        'periode' => $item->periode ?? '',
-                        'tahun' => $item->tahun ?? '',
-                        'akun_kas_keluar' => $item->NamaAkunKeluar ?: '-',
-                        'akun_kas_masuk' => $item->NamaAkunMasuk ?: '-',
-                    ];
-                })
+                ->map(fn ($item) => $this->mapJurnalRow($item))
                 ->toArray();
 
             return response()->json([

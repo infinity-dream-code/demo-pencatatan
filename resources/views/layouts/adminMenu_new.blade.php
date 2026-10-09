@@ -352,12 +352,12 @@
                     </a>
                 </li>
                 <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana/kas-masuk*']) ? 'active' : '' }}">
-                    <a href="{{ route('admin.pencatatan-sederhana.kas-masuk') }}" class="menu-link">
+                    <a href="{{ route('admin.pencatatan-sederhana.kas-masuk.index') }}" class="menu-link">
                         <div>Kas Masuk</div>
                     </a>
                 </li>
                 <li class="menu-item {{ Request::is(['admin/pencatatan-sederhana/kas-keluar*']) ? 'active' : '' }}">
-                    <a href="{{ route('admin.pencatatan-sederhana.kas-keluar') }}" class="menu-link">
+                    <a href="{{ route('admin.pencatatan-sederhana.kas-keluar.index') }}" class="menu-link">
                         <div>Kas Keluar</div>
                     </a>
                 </li>

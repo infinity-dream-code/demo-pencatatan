@@ -2,12 +2,13 @@
 
 namespace App\Http\Controllers\Admin\Pencatatan;
 
+use App\Http\Controllers\Admin\Pencatatan\Concerns\QueriesAktJurnal;
 use App\Http\Controllers\Controller;
 use App\Models\akun_kas_keluar;
 use App\Models\akun_kas_masuk;
-use App\Models\akt_jurnal_in_out;
+use App\Models\akt_jurnal;
+use App\Support\PencatatanJurnalTable;
 use App\Support\SmartcardExcelExport;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -15,6 +16,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class RekapExportExcelController extends Controller
 {
+    use QueriesAktJurnal;
+
     public string $title = 'Pencatatan Sederhana';
     public string $mainTitle = 'Rekap Export Excel';
     public string $dataTitle = 'Rekap export excel Kas Masuk dan Kas Keluar';
@@ -26,8 +29,8 @@ class RekapExportExcelController extends Controller
         $akunKeluar = collect();
 
         try {
-            if (Schema::connection('DATA_MYSQL')->hasTable('akt_jurnal_in_out')) {
-                $periodes = akt_jurnal_in_out::query()
+            if (Schema::connection('DATA_MYSQL')->hasTable(PencatatanJurnalTable::name())) {
+                $periodes = akt_jurnal::query()
                     ->whereNotNull('periode')
                     ->where('periode', '!=', '')
                     ->distinct()
@@ -115,13 +118,13 @@ class RekapExportExcelController extends Controller
             [$filters, $searchValue] = $this->extractFilters($request);
             [$columnName, $columnSortOrder] = $this->resolveSort($request);
 
-            $baseQuery = $this->baseQuery();
+            $baseQuery = $this->jurnalBaseQuery();
             $totalRecords = (clone $baseQuery)->count();
 
             $filteredQuery = clone $baseQuery;
-            $this->applyFilters($filteredQuery, $filters, $searchValue);
+            $this->applyJurnalFilters($filteredQuery, $filters, $searchValue);
             $totalRecordswithFilter = (clone $filteredQuery)->count();
-            $saldo = $this->calculateSaldo($filters, $searchValue);
+            $saldo = $this->calculateJurnalSaldo($filters, $searchValue);
 
             $records = $filteredQuery
                 ->orderBy($columnName, $columnSortOrder)
@@ -129,7 +132,7 @@ class RekapExportExcelController extends Controller
                 ->skip($start)
                 ->take($rowperpage)
                 ->get()
-                ->map(fn ($item) => $this->mapRow($item, $saldo))
+                ->map(fn ($item) => $this->mapJurnalRow($item, $saldo))
                 ->toArray();
 
             return response()->json([
@@ -162,16 +165,16 @@ class RekapExportExcelController extends Controller
         [$filters, $searchValue] = $this->extractFilters($request);
         [$columnName, $columnSortOrder] = $this->resolveSort($request);
 
-        $query = $this->baseQuery();
-        $this->applyFilters($query, $filters, $searchValue);
-        $saldo = $this->calculateSaldo($filters, $searchValue);
+        $query = $this->jurnalBaseQuery();
+        $this->applyJurnalFilters($query, $filters, $searchValue);
+        $saldo = $this->calculateJurnalSaldo($filters, $searchValue);
 
         $rows = $query
             ->orderBy($columnName, $columnSortOrder)
             ->orderBy('urut', 'asc')
             ->get()
             ->map(function ($item) use ($saldo) {
-                $mapped = $this->mapRow($item, $saldo);
+                $mapped = $this->mapJurnalRow($item, $saldo);
                 return [
                     SmartcardExcelExport::datetimeCell($mapped['tanggal']),
                     $mapped['no_bukti'],
@@ -213,23 +216,6 @@ class RekapExportExcelController extends Controller
         );
     }
 
-    private function baseQuery(): Builder
-    {
-        return akt_jurnal_in_out::query()->select([
-            'urut',
-            'tanggal',
-            'no_bukti',
-            'keterangan',
-            'debet',
-            'kredit',
-            'tahun',
-            'periode',
-            'buktiurl',
-            'NamaAkunMasuk',
-            'NamaAkunKeluar',
-        ]);
-    }
-
     /**
      * @return array{0: array<string, string>, 1: string}
      */
@@ -259,17 +245,7 @@ class RekapExportExcelController extends Controller
      */
     private function resolveSort(Request $request): array
     {
-        $sortMap = [
-            'tanggal' => 'tanggal',
-            'no_bukti' => 'no_bukti',
-            'nominal_keluar' => 'debet',
-            'nominal_masuk' => 'kredit',
-            'keterangan' => 'keterangan',
-            'periode' => 'periode',
-            'tahun' => 'tahun',
-            'akun_kas_keluar' => 'NamaAkunKeluar',
-            'akun_kas_masuk' => 'NamaAkunMasuk',
-        ];
+        $sortMap = $this->jurnalSortMap();
 
         $columnName = 'tanggal';
         $columnSortOrder = 'asc';
@@ -285,88 +261,5 @@ class RekapExportExcelController extends Controller
         }
 
         return [$columnName, $columnSortOrder];
-    }
-
-    /**
-     * @param  array<string, string>  $filters
-     */
-    private function applyFilters(Builder $query, array $filters, string $searchValue): void
-    {
-        if ($searchValue !== '') {
-            $query->where(function ($q) use ($searchValue) {
-                $q->where('no_bukti', 'like', '%' . $searchValue . '%')
-                    ->orWhere('keterangan', 'like', '%' . $searchValue . '%')
-                    ->orWhere('periode', 'like', '%' . $searchValue . '%')
-                    ->orWhere('tahun', 'like', '%' . $searchValue . '%')
-                    ->orWhere('NamaAkunMasuk', 'like', '%' . $searchValue . '%')
-                    ->orWhere('NamaAkunKeluar', 'like', '%' . $searchValue . '%');
-            });
-        }
-
-        if ($filters['periode'] !== '' && strtolower($filters['periode']) !== 'all') {
-            $query->where('periode', $filters['periode']);
-        }
-
-        if ($filters['no_bukti'] !== '') {
-            $query->where('no_bukti', 'like', '%' . $filters['no_bukti'] . '%');
-        }
-
-        if ($filters['keterangan'] !== '') {
-            $query->where('keterangan', 'like', '%' . $filters['keterangan'] . '%');
-        }
-
-        if ($filters['tanggal_dari'] !== '' && $filters['tanggal_dari'] !== '0000-00-00') {
-            $query->whereDate('tanggal', '>=', $filters['tanggal_dari']);
-        }
-
-        if ($filters['tanggal_sampai'] !== '' && $filters['tanggal_sampai'] !== '0000-00-00') {
-            $query->whereDate('tanggal', '<=', $filters['tanggal_sampai']);
-        }
-
-        if ($filters['akun_masuk'] !== '' && strtolower($filters['akun_masuk']) !== 'all') {
-            $query->where('NamaAkunMasuk', $filters['akun_masuk']);
-        }
-
-        if ($filters['akun_keluar'] !== '' && strtolower($filters['akun_keluar']) !== 'all') {
-            $query->where('NamaAkunKeluar', $filters['akun_keluar']);
-        }
-    }
-
-    /**
-     * @param  array<string, string>  $filters
-     */
-    private function calculateSaldo(array $filters, string $searchValue): int
-    {
-        $saldoQuery = akt_jurnal_in_out::query();
-        $this->applyFilters($saldoQuery, $filters, $searchValue);
-        $aggregate = $saldoQuery
-            ->selectRaw('COALESCE(SUM(kredit), 0) as total_masuk, COALESCE(SUM(debet), 0) as total_keluar')
-            ->first();
-
-        return (int) ($aggregate->total_masuk ?? 0) - (int) ($aggregate->total_keluar ?? 0);
-    }
-
-    private function mapRow(object $item, int $saldo): array
-    {
-        $bukti = trim((string) ($item->buktiurl ?? ''));
-        if ($bukti === '' || $bukti === '-') {
-            $bukti = '-';
-        }
-
-        return [
-            'item_id' => $item->urut,
-            'urut' => $item->urut,
-            'tanggal' => $item->tanggal,
-            'no_bukti' => $item->no_bukti ?? '',
-            'nominal_keluar' => (int) ($item->debet ?? 0),
-            'nominal_masuk' => (int) ($item->kredit ?? 0),
-            'foto' => $bukti,
-            'periode' => $item->periode ?? '',
-            'tahun' => $item->tahun ?? '',
-            'keterangan' => $item->keterangan ?? '',
-            'saldo' => $saldo,
-            'akun_kas_keluar' => $item->NamaAkunKeluar ?: '-',
-            'akun_kas_masuk' => $item->NamaAkunMasuk ?: '-',
-        ];
     }
 }
